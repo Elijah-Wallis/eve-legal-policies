@@ -2,6 +2,22 @@
 .env
 .env.*
 
+# macOS noise
+.DS_Store
+
+# Local runtime/output
+.run/
+docs/self_improve/
+tools/eval/out/
+data/
+logs/
+
+# Local bundles
+artifacts/*.tar.gz
+artifacts/*.bundle
+artifacts/eve_agent_codebase*
+artifacts/eve-agent-codebase*
+
 # Python
 .venv/
 __pycache__/
