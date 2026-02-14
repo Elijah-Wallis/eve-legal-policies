@@ -161,6 +161,6 @@ This document captures the root causes, fixes, and guardrails from the Retell we
 
 ## Metadata
 - Date: 2026-02-14
-- Branch: `codex/retell-ws-hardening`
-- Branch URL: https://github.com/Elijah-Wallis/eve-legal-policies/tree/codex/retell-ws-hardening
+- Branch: `codex/websocket-voice-agent`
+- Branch URL: https://github.com/Elijah-Wallis/eve-legal-policies/tree/codex/websocket-voice-agent
 - Commit: d025059a9ddef1e8b768f40af22b688a5f82b79f
