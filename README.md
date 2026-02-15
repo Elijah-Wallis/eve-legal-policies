@@ -46,11 +46,39 @@ Revenue-ops loop (objective function, real call artifacts):
 Learning loop (auto-pulls transcript + recording metadata and refines prompt at threshold):
 
 - `make learn` runs one sync/analyze cycle.
-- `scripts/call_b2b.sh` also queues this in background automatically after each call by default.
+- `scripts/call_b2b.sh` no longer auto-applies prompt updates.
+- Current locked posture defaults:
+  - `RETELL_AUTO_LEARN_ON_CALL=false`
+  - `RETELL_LEARN_APPLY=false`
+  - `B2B_CLOSE_PROMPT_LOCK=1`
 - Defaults:
   - `RETELL_LEARN_THRESHOLD=250` (auto-refine once corpus reaches ~200-300 calls)
   - `RETELL_LEARN_LIMIT=100`
-  - `RETELL_AUTO_LEARN_ON_CALL=true`
+
+To intentionally update the locked Apex Medspa closer prompt:
+
+1. Edit `scripts/prompts/b2b_fast_plain.prompt.txt` only.
+2. Unlock once:
+   ```bash
+   export B2B_CLOSE_PROMPT_UNLOCK=1
+   ```
+3. Push the prompt:
+   ```bash
+   cd '<repo_root>'
+   B2B_CLOSE_PROMPT_LOCK=1 ./scripts/retell_fast_recover.sh
+   ```
+4. Turn lock guard back on automatically (recommended):
+   ```bash
+   unset B2B_CLOSE_PROMPT_UNLOCK
+   ```
+5. Verify lock + websocket:
+   ```bash
+   ./scripts/verify_voice_agent_lock.sh
+   ```
+6. Resume calling:
+   ```bash
+   make call
+   ```
 
 Lead Factory (ICP scraping/enrichment scorer for outbound queues):
 
@@ -71,6 +99,8 @@ Lead Factory (ICP scraping/enrichment scorer for outbound queues):
 Skills / shell / self-improve helpers:
 
 ```bash
+# This installs `openclaw-*` helpers into your active virtualenv bin and ~/.local/bin.
+# If command lookup still fails, add one of those dirs to PATH.
 bash scripts/setup_shell_commands.sh
 openclaw-skill-capture --id fix_timeout --intent "Recover from tool timeout" --tests tests/test_tool_grounding.py::test_tool_timeout_falls_back_without_numbers
 openclaw-skill-validate skills/fix_timeout.md
@@ -105,8 +135,8 @@ Dashboard:
 
 WebSocket endpoints:
 
-- `ws://{host}/ws/{call_id}`
-- `ws://{host}/llm-websocket/{call_id}` (alias)
+- `ws://{host}/llm-websocket/{call_id}` (canonical default)
+- `ws://{host}/ws/{call_id}` (legacy compatibility)
 
 Retell pacing defaults:
 
@@ -129,8 +159,8 @@ Optional env flags:
 - `VOICE_NO_REASONING_LEAK=true`
 - `VOICE_JARGON_BLOCKLIST_ENABLED=true`
 - `RETELL_SEND_UPDATE_AGENT_ON_CONNECT=true`
-- `RETELL_RESPONSIVENESS=1.0`
-- `RETELL_INTERRUPTION_SENSITIVITY=1.0`
+- `RETELL_RESPONSIVENESS=0.5`
+- `RETELL_INTERRUPTION_SENSITIVITY=0.5`
 - `SKILLS_ENABLED=false`
 - `SKILLS_DIR=skills`
 - `SKILLS_MAX_INJECTED=3`
@@ -145,16 +175,16 @@ Optional env flags:
 Cloudflare production WebSocket checklist (for calling from Retell):
 
 - DNS and tunnel alignment:
-  - `BRAIN_WSS_BASE_URL` should point at a stable, resolvable host (example: `wss://ws.evesystems.org/llm-websocket`), not a temporary `*.trycloudflare.com` name.
+  - `BRAIN_WSS_BASE_URL` should point at a stable, resolvable host (example: `wss://voice-agent.evesystems.org/llm-websocket`), not a temporary `*.trycloudflare.com` name.
   - The host must resolve to a configured Cloudflare tunnel ingress and route to the local port where the brain is actually running.
 - For the current workspace:
-  - Cloudflare currently has `ws.evesystems.org -> http://127.0.0.1:8099` tunnel ingress.
+  - Cloudflare currently has `voice-agent.evesystems.org -> http://127.0.0.1:8099` tunnel ingress.
   - Run the brain on port `8099` when receiving calls via this stable host.
   - `scripts/cloudflare_verify.sh` validates token + tunnel ingress + DNS.
 - Practical zero-downtime checks before a call:
-  1. Run `./scripts/cloudflare_verify.sh` and confirm `dns_ok=True` for `ws.evesystems.org`.
+  1. Run `./scripts/cloudflare_verify.sh` and confirm `dns_ok=True` for `voice-agent.evesystems.org`.
   2. Confirm brain is reachable: `nc -vz 127.0.0.1 8099`.
-  3. Confirm agent websocket URL matches env:
+ 3. Confirm agent websocket URL matches env:
      ```bash
      python3 - <<'PY'
      import json
@@ -171,26 +201,16 @@ Cloudflare production WebSocket checklist (for calling from Retell):
      print(payload.get("response_engine"))
      PY
      ```
-  4. Use `scripts/call_b2b.sh` (it now auto-resolves stable Cloudflare websocket host if `BRAIN_WSS_BASE_URL` is empty).
+  4. Run `scripts/verify_voice_agent_lock.sh` to hard-fail if the rollout drifts off the approved websocket agent.
+  5. Use `scripts/call_b2b.sh` (it now auto-resolves stable Cloudflare websocket host if `BRAIN_WSS_BASE_URL` is empty).
 
-Gemini (optional):
+Gemini (voice profile - locked for this repo):
 
 - `BRAIN_USE_LLM_NLG=true`
 - `LLM_PROVIDER=gemini`
 - `GEMINI_API_KEY=...` (Developer API) OR `GEMINI_VERTEXAI=true` + `GEMINI_PROJECT=...` + `GEMINI_LOCATION=global`
 - `GEMINI_MODEL=gemini-3-flash-preview`
 - `GEMINI_THINKING_LEVEL=minimal` (recommended for low-latency voice)
-
-OpenAI Responses (optional, dual-provider pilot):
-
-- `BRAIN_USE_LLM_NLG=true`
-- `LLM_PROVIDER=openai`
-- `OPENAI_API_KEY=...`
-- `OPENAI_MODEL=gpt-5-mini`
-- `OPENAI_REASONING_EFFORT=minimal`
-- `OPENAI_TIMEOUT_MS=8000`
-- `OPENAI_CANARY_ENABLED=false`
-- `OPENAI_CANARY_PERCENT=0` (0..100)
 
 Shell trigger (explicit operator intent):
 
@@ -266,7 +286,7 @@ Retell references:
 | Outbound queue | `BRAIN_OUTBOUND_QUEUE_MAX` | `256` |
 | Inbound queue | `BRAIN_INBOUND_QUEUE_MAX` | `256` |
 | Ping interval | `BRAIN_PING_INTERVAL_MS` | `2000` |
-| Idle watchdog | `BRAIN_IDLE_TIMEOUT_MS` | `5000` |
+| Idle watchdog | `BRAIN_IDLE_TIMEOUT_MS` | `60000` |
 | Write timeout | `WS_WRITE_TIMEOUT_MS` | `400` |
 | Max consecutive write timeouts | `WS_MAX_CONSECUTIVE_WRITE_TIMEOUTS` | `2` |
 | Close on write timeout | `WS_CLOSE_ON_WRITE_TIMEOUT` | `true` |
@@ -316,3 +336,26 @@ Backpressure policy:
    - optional: query token mode (OFF by default)
    - if behind a proxy, trust `X-Forwarded-For` only when trusted-proxy mode is enabled and proxy CIDRs are configured
 ```
+
+## Ontology Synthetic Gate (Retell + n8n + Supabase)
+
+Use this flow to validate the synthetic acceptance harness end-to-end:
+
+```bash
+make synth-generate
+make synth-push-leads
+make synth-call-batch
+make synth-map-journeys
+make synth-export-supabase
+```
+
+Recommended direct commands (as documented for acceptance gates):
+
+```bash
+python3 synthetic_data_for_training/generate_medspa_synthetic_data.py --campaign-id ont-smoke-001 --output-dir /tmp/medspa_synthetic --clinics 20 --patients 200 --sessions 100
+python3 scripts/synthetic_to_n8n_campaign.py --input-dir /tmp/medspa_synthetic --out data/retell_calls --dry-run
+python3 scripts/run_synthetic_campaign.py --max-calls 1 --limit-call-rate 0 --resume
+python3 scripts/synthetic_journey_mapper.py --calls-dir data/retell_calls --campaign-id ont-smoke-001 --out data/retell_calls/synthetic_customer_journeys.jsonl
+```
+
+For precise payload contracts for n8n and Supabase, use `docs/ontology-synthetic-gate.md`.

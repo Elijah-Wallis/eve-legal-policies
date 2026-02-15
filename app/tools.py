@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
@@ -90,6 +91,8 @@ class ToolRegistry:
             "clinic_policies": self._clinic_policies,
             "send_evidence_package": self._send_evidence_package,
             "mark_dnc_compliant": self._mark_dnc_compliant,
+            "log_call_outcome": self._log_call_outcome,
+            "set_follow_up_plan": self._set_follow_up_plan,
             "run_shell_command": self._run_shell_command,
         }
 
@@ -326,6 +329,70 @@ class ToolRegistry:
                 "tool": "mark_dnc_compliant",
                 "reason": reason,
                 "status": "dnc_recorded",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    async def _log_call_outcome(self, arguments: dict[str, Any]) -> str:
+        tenant = str(arguments.get("tenant", "synthetic_medspa")).strip()
+        campaign_id = str(arguments.get("campaign_id", "")).strip()
+        clinic_id = str(arguments.get("clinic_id", "")).strip()
+        lead_id = str(arguments.get("lead_id", "")).strip()
+        call_id = str(arguments.get("call_id", "")).strip()
+        reason = str(arguments.get("reason", "queued")).strip().lower()
+        next_step = str(arguments.get("next_step", "queued")).strip()
+        if not next_step:
+            next_step = "queued"
+        timestamp_ms = int(arguments.get("timestamp_ms", 0) or 0)
+        if not timestamp_ms:
+            timestamp_ms = int(time.time() * 1000)
+
+        return json.dumps(
+            {
+                "ok": True,
+                "tool": "log_call_outcome",
+                "status": "acknowledged",
+                "reason": reason,
+                "tenant": tenant,
+                "campaign_id": campaign_id,
+                "clinic_id": clinic_id,
+                "lead_id": lead_id,
+                "call_id": call_id,
+                "next_step": next_step,
+                "timestamp_ms": timestamp_ms,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    async def _set_follow_up_plan(self, arguments: dict[str, Any]) -> str:
+        tenant = str(arguments.get("tenant", "synthetic_medspa")).strip()
+        campaign_id = str(arguments.get("campaign_id", "")).strip()
+        clinic_id = str(arguments.get("clinic_id", "")).strip()
+        lead_id = str(arguments.get("lead_id", "")).strip()
+        call_id = str(arguments.get("call_id", "")).strip()
+        reason = str(arguments.get("reason", "queued")).strip().lower()
+        next_step = str(arguments.get("next_step", "queued")).strip()
+        if not next_step:
+            next_step = "queued"
+        timestamp_ms = int(arguments.get("timestamp_ms", 0) or 0)
+        if not timestamp_ms:
+            timestamp_ms = int(time.time() * 1000)
+
+        return json.dumps(
+            {
+                "ok": True,
+                "tool": "set_follow_up_plan",
+                "status": "acknowledged",
+                "reason": reason,
+                "tenant": tenant,
+                "campaign_id": campaign_id,
+                "clinic_id": clinic_id,
+                "lead_id": lead_id,
+                "call_id": call_id,
+                "next_step": next_step,
+                "timestamp_ms": timestamp_ms,
             },
             sort_keys=True,
             separators=(",", ":"),

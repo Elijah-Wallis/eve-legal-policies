@@ -1,4 +1,6 @@
-.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate
+.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase
+
+LEARN_APPLY_FLAG := $(if $(filter true 1,$(RETELL_LEARN_APPLY)),--apply,--no-apply)
 
 help:
 	@echo "Simple commands:"
@@ -20,6 +22,11 @@ help:
 	@echo "  make ci-local              # run local hard gates without dependency install"
 	@echo "  make metrics               # print key metric summary from /metrics"
 	@echo "  make dashboard             # open Eve dashboard URL"
+	@echo "  make synth-generate        # generate synthetic MedSpa dataset in SYNTHETIC_OUTPUT_DIR"
+	@echo "  make synth-push-leads      # build synthetic call queue jsonl"
+	@echo "  make synth-call-batch      # run synthetic outbound batch from queue"
+	@echo "  make synth-map-journeys    # normalize Retell calls into synthetic journey rows"
+	@echo "  make synth-export-supabase # export synthetic journeys into Supabase tables"
 	@echo "  make self-improve          # run safe self-improvement cycle (propose)"
 	@echo "  make skill-capture ID=... INTENT=... [TESTS=...]"
 	@echo "  make skill-validate PATH=skills/<file>.md"
@@ -46,7 +53,7 @@ cloudflare-verify:
 	@./scripts/cloudflare_verify.sh
 
 learn:
-	@python3 scripts/retell_learning_loop.py --limit $${RETELL_LEARN_LIMIT:-100} --threshold $${RETELL_LEARN_THRESHOLD:-250}
+	@python3 scripts/retell_learning_loop.py --limit $${RETELL_LEARN_LIMIT:-100} --threshold $${RETELL_LEARN_THRESHOLD:-250} $(LEARN_APPLY_FLAG)
 
 leads:
 	@python3 scripts/lead_factory.py --input "$(INPUT)" --out-dir $${LEAD_OUT_DIR:-data/leads} --min-score $${LEAD_MIN_SCORE:-60} --top-k $${LEAD_TOP_K:-500}
@@ -55,7 +62,7 @@ ops-loop:
 	@python3 scripts/revenue_ops_loop.py --calls-dir $${OPS_CALLS_DIR:-data/retell_calls} --out-dir $${OPS_OUT_DIR:-data/revenue_ops}
 
 money:
-	@python3 scripts/retell_learning_loop.py --limit $${RETELL_LEARN_LIMIT:-100} --threshold $${RETELL_LEARN_THRESHOLD:-250}
+	@python3 scripts/retell_learning_loop.py --limit $${RETELL_LEARN_LIMIT:-100} --threshold $${RETELL_LEARN_THRESHOLD:-250} $(LEARN_APPLY_FLAG)
 	@python3 scripts/revenue_ops_loop.py --calls-dir $${OPS_CALLS_DIR:-data/retell_calls} --out-dir $${OPS_OUT_DIR:-data/revenue_ops}
 	@URL=$${METRICS_URL:-http://127.0.0.1:8080/metrics}; \
 	if curl -fsS "$$URL" >/dev/null 2>&1; then \
@@ -101,3 +108,42 @@ skill-capture:
 
 skill-validate:
 	@python3 scripts/skills/validate_skill.py "$(PATH)"
+
+SYNTHETIC_OUTPUT_DIR ?= /tmp/medspa_synthetic
+SYNTHETIC_CAMPAIGN_ID ?= ont-smoke-001
+SYNTHETIC_CALL_QUEUE ?= data/retell_calls/synthetic_campaign_call_queue.jsonl
+SYNTHETIC_MAX_CALLS ?= 0
+
+synth-generate:
+	@python3 synthetic_data_for_training/generate_medspa_synthetic_data.py \
+		--campaign-id "$(SYNTHETIC_CAMPAIGN_ID)" \
+		--output-dir "$(SYNTHETIC_OUTPUT_DIR)"
+
+synth-push-leads:
+	@python3 scripts/synthetic_to_n8n_campaign.py \
+		--input-dir "$(SYNTHETIC_OUTPUT_DIR)" \
+		--out data/retell_calls \
+		--campaign-id "$(SYNTHETIC_CAMPAIGN_ID)" \
+		--write-summary
+
+synth-call-batch:
+	@python3 scripts/run_synthetic_campaign.py \
+		--queue-file "$(SYNTHETIC_CALL_QUEUE)" \
+		--out-dir data/retell_calls \
+		--resume \
+		--max-calls "$(SYNTHETIC_MAX_CALLS)"
+
+synth-map-journeys:
+	@python3 scripts/synthetic_journey_mapper.py \
+		--calls-dir data/retell_calls \
+		--campaign-id "$(SYNTHETIC_CAMPAIGN_ID)" \
+		--lead-file "$(SYNTHETIC_OUTPUT_DIR)/medspa_leads.csv" \
+		--out data/retell_calls/synthetic_customer_journeys.jsonl
+
+synth-export-supabase:
+	@python3 scripts/export_journey_to_supabase.py \
+		--calls-dir data/retell_calls \
+		--journey-path data/retell_calls/synthetic_customer_journeys.jsonl \
+		--supabase-url "$${SUPABASE_URL}" \
+		--supabase-key "$${SUPABASE_SERVICE_KEY}" \
+		--schema "$${SUPABASE_SCHEMA:-public}"
