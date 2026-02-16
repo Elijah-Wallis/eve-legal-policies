@@ -1,4 +1,4 @@
-.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase
+.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase live-build-queue live-call-batch live-map-journeys live-export-supabase
 
 LEARN_APPLY_FLAG := $(if $(filter true 1,$(RETELL_LEARN_APPLY)),--apply,--no-apply)
 
@@ -27,6 +27,10 @@ help:
 	@echo "  make synth-call-batch      # run synthetic outbound batch from queue"
 	@echo "  make synth-map-journeys    # normalize Retell calls into synthetic journey rows"
 	@echo "  make synth-export-supabase # export synthetic journeys into Supabase tables"
+	@echo "  make live-build-queue      # build live B2B queue from Apify/local file"
+	@echo "  make live-call-batch       # run live outbound calls from live queue"
+	@echo "  make live-map-journeys     # normalize Retell calls into live journey rows"
+	@echo "  make live-export-supabase  # export live journey rows into Supabase"
 	@echo "  make self-improve          # run safe self-improvement cycle (propose)"
 	@echo "  make skill-capture ID=... INTENT=... [TESTS=...]"
 	@echo "  make skill-validate PATH=skills/<file>.md"
@@ -114,6 +118,15 @@ SYNTHETIC_CAMPAIGN_ID ?= ont-smoke-001
 SYNTHETIC_CALL_QUEUE ?= data/retell_calls/synthetic_campaign_call_queue.jsonl
 SYNTHETIC_MAX_CALLS ?= 0
 
+LIVE_OUTPUT_DIR ?= data/leads
+LIVE_CAMPAIGN_ID ?= ont-live-001
+LIVE_CAMPAIGN_NAME ?= b2b_outbound_workflow
+LIVE_QUEUE_FILE ?= $(LIVE_OUTPUT_DIR)/live_call_queue.jsonl
+LIVE_LEAD_FILE ?= $(LIVE_OUTPUT_DIR)/live_leads.csv
+LIVE_MAX_CALLS ?= 0
+LIVE_CONCURRENCY ?= 20
+LIVE_TENANT ?= live_medspa
+
 synth-generate:
 	@python3 synthetic_data_for_training/generate_medspa_synthetic_data.py \
 		--campaign-id "$(SYNTHETIC_CAMPAIGN_ID)" \
@@ -144,6 +157,43 @@ synth-export-supabase:
 	@python3 scripts/export_journey_to_supabase.py \
 		--calls-dir data/retell_calls \
 		--journey-path data/retell_calls/synthetic_customer_journeys.jsonl \
+		--supabase-url "$${SUPABASE_URL}" \
+		--supabase-key "$${SUPABASE_SERVICE_KEY}" \
+		--schema "$${SUPABASE_SCHEMA:-public}"
+
+live-build-queue:
+	@python3 scripts/build_live_campaign_queue.py \
+		--campaign-id "$(LIVE_CAMPAIGN_ID)" \
+		--campaign-name "$(LIVE_CAMPAIGN_NAME)" \
+		--out-dir "$(LIVE_OUTPUT_DIR)" \
+		--top-k "$${CAMPAIGN_TOP_K:-500}" \
+		--states "$${CAMPAIGN_STATES:-Texas,Florida,California}" \
+		--query "$${CAMPAIGN_QUERY:-medspa}"
+
+live-call-batch:
+	@python3 scripts/run_live_campaign.py \
+		--queue-file "$(LIVE_QUEUE_FILE)" \
+		--out-dir data/retell_calls \
+		--campaign-id "$(LIVE_CAMPAIGN_ID)" \
+		--tenant "$(LIVE_TENANT)" \
+		--max-calls "$(LIVE_MAX_CALLS)" \
+		--concurrency "$(LIVE_CONCURRENCY)" \
+		--resume \
+		--limit-call-rate
+
+live-map-journeys:
+	@python3 scripts/synthetic_journey_mapper.py \
+		--calls-dir data/retell_calls \
+		--campaign-id "$(LIVE_CAMPAIGN_ID)" \
+		--tenant "$(LIVE_TENANT)" \
+		--lead-file "$(LIVE_LEAD_FILE)" \
+		--out data/retell_calls/live_customer_journeys.jsonl \
+		--push-webhook "$${N8N_OUTCOME_WEBHOOK_URL:-}"
+
+live-export-supabase:
+	@python3 scripts/export_journey_to_supabase.py \
+		--calls-dir data/retell_calls \
+		--journey-path data/retell_calls/live_customer_journeys.jsonl \
 		--supabase-url "$${SUPABASE_URL}" \
 		--supabase-key "$${SUPABASE_SERVICE_KEY}" \
 		--schema "$${SUPABASE_SCHEMA:-public}"

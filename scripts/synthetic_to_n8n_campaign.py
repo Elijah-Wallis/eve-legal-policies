@@ -100,7 +100,7 @@ def main() -> int:
     campaign_id = str(args.campaign_id or manifest.get("campaign_id") or "ont-synthetic-default").strip()
 
     queue = _build_queue(leads, campaign_id=campaign_id, campaign_tier=args.campaign_tier, notes=args.notes)
-    queue.sort(key=lambda r: (str(r.get("clinic_id")), str(r.get("lead_id")))
+    queue.sort(key=lambda r: (str(r.get("clinic_id")), str(r.get("lead_id"))))
 
     queue_path = out_dir / "synthetic_campaign_call_queue.jsonl"
 
