@@ -196,6 +196,15 @@ def _extract_recording_followup_requests(tool_events: list[dict[str, Any]]) -> l
     return out
 
 
+def _extract_recording_followup_reasons(requests: list[dict[str, Any]]) -> list[str]:
+    reasons: list[str] = []
+    for item in requests:
+        reason = str(item.get("reason", "")).strip().lower()
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
 def _normalize_transcript(call: dict[str, Any]) -> str:
     raw = str(call.get("transcript") or "").strip()
     if raw:
@@ -401,6 +410,7 @@ def main() -> int:
         tool_events = _extract_tool_events(call)
         tool_names = [event["name"] for event in tool_events]
         recording_followup_requests = _extract_recording_followup_requests(tool_events)
+        recording_followup_reasons = _extract_recording_followup_reasons(recording_followup_requests)
         outcome = _call_outcome_from_analysis(call)
         raw_outcome = outcome
 
@@ -434,6 +444,8 @@ def main() -> int:
             "recording_url": recording_url,
             "recording_followup_requested": bool(recording_followup_requests),
             "recording_followup_requests": recording_followup_requests,
+            "recording_followup_reasons": recording_followup_reasons,
+            "recording_followup_reason": recording_followup_reasons[0] if recording_followup_reasons else "",
             "attempt_number": attempt_number,
             "attempt_warning_threshold": attempt_warning_threshold,
             "attempts_exceeded_200": attempts_exceeded_200,
