@@ -17,6 +17,7 @@ required_env=(
   RETELL_API_KEY
   RETELL_FROM_NUMBER
   B2B_AGENT_ID
+  APIFY_API_TOKEN
 )
 
 missing=()
