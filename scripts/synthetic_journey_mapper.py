@@ -118,44 +118,82 @@ def _build_lead_index_by_phone(leads: dict[str, dict[str, Any]]) -> dict[str, di
     return idx
 
 
+def _normalize_tool_name(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _parse_tool_arguments(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
 def _extract_tool_calls(call: dict[str, Any]) -> list[str]:
     names: list[str] = []
+    for name in [event["name"] for event in _extract_tool_events(call)]:
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _extract_tool_events(call: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
     raw = call.get("tool_calls")
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, dict):
-                name = str(item.get("name") or item.get("tool_name") or "").strip()
+                name = _normalize_tool_name(item.get("name") or item.get("tool_name"))
                 if name:
-                    names.append(name)
-                args = item.get("arguments")
-                if isinstance(args, str):
-                    try:
-                        parsed = json.loads(args)
-                        if isinstance(parsed, dict):
-                            item["arguments"] = parsed
-                    except Exception:
-                        pass
+                    event = {"name": name}
+                    event["arguments"] = _parse_tool_arguments(item.get("arguments"))
+                    events.append(event)
     twt = call.get("transcript_with_tool_calls")
     if isinstance(twt, list):
         for item in twt:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or item.get("tool_name") or "").strip()
-            if name:
-                names.append(name)
-            args = item.get("arguments")
-            if isinstance(args, str):
-                try:
-                    parsed = json.loads(args)
-                    if isinstance(parsed, dict):
-                        item["arguments"] = parsed
-                except Exception:
-                    pass
-    deduped: list[str] = []
-    for name in names:
-        if name not in deduped:
-            deduped.append(name)
-    return deduped
+            name = _normalize_tool_name(item.get("name") or item.get("tool_name"))
+            if not name:
+                continue
+            if any(e.get("name") == name for e in events):
+                continue
+            event = {"name": name}
+            event["arguments"] = _parse_tool_arguments(item.get("arguments"))
+            events.append(event)
+    return events
+
+
+def _extract_recording_followup_requests(tool_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for event in tool_events:
+        if _normalize_tool_name(event.get("name")) != "send_call_recording_followup":
+            continue
+        args = event.get("arguments") if isinstance(event.get("arguments"), dict) else {}
+        out.append(
+            {
+                "tool": "send_call_recording_followup",
+                "campaign_id": str(args.get("campaign_id", "")).strip(),
+                "clinic_id": str(args.get("clinic_id", "")).strip(),
+                "lead_id": str(args.get("lead_id", "")).strip(),
+                "call_id": str(args.get("call_id", "")).strip(),
+                "to_number": str(args.get("to_number", "")).strip(),
+                "recording_url": str(args.get("recording_url", args.get("call_recording_url", ""))).strip(),
+                "recipient_email": str(args.get("recipient_email", "")).strip(),
+                "recipient_phone": str(args.get("recipient_phone", "")).strip(),
+                "channel": _normalize_tool_name(args.get("channel", args.get("channels", "twilio_sms"))),
+                "reason": str(args.get("reason", "queued")).strip().lower(),
+                "next_step": str(args.get("next_step", "")).strip(),
+                "timestamp_ms": _to_int(args.get("timestamp_ms"), int(time.time() * 1000)),
+            }
+        )
+    return out
 
 
 def _normalize_transcript(call: dict[str, Any]) -> str:
@@ -205,7 +243,9 @@ def _sentiment_from_analysis(call: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _extract_captured_email(call: dict[str, Any], transcript: str, tool_names: list[str]) -> str:
+def _extract_captured_email(
+    call: dict[str, Any], transcript: str, tool_names: list[str], tool_events: list[dict[str, Any]] | None = None
+) -> str:
     if "send_evidence_package" in [n.lower() for n in tool_names]:
         raw = call.get("tool_calls")
         if isinstance(raw, list):
@@ -215,6 +255,15 @@ def _extract_captured_email(call: dict[str, Any], transcript: str, tool_names: l
                     email = str(args.get("recipient_email") or "").strip()
                     if email:
                         return email
+    if tool_events:
+        for item in tool_events:
+            name = _normalize_tool_name(item.get("name"))
+            if name != "send_call_recording_followup":
+                continue
+            args = item.get("arguments") if isinstance(item.get("arguments"), dict) else {}
+            email = str((args.get("recipient_email") or "")).strip()
+            if email:
+                return email
     for line in EMAIL_RE.findall(transcript):
         email = line.strip().lower()
         local = email.split("@", 1)[0] if "@" in email else ""
@@ -224,6 +273,8 @@ def _extract_captured_email(call: dict[str, Any], transcript: str, tool_names: l
 
 
 def _fallback_stage(transcript: str, tool_names: list[str]) -> str:
+    if any(_normalize_tool_name(n) == "send_call_recording_followup" for n in tool_names):
+        return "voicemail"
     if any(n in {"send_evidence_package"} for n in tool_names):
         return "email_captured"
     if any(n in {"mark_dnc_compliant"} for n in tool_names):
@@ -315,6 +366,7 @@ def main() -> int:
         to_number = str(call.get("to_number") or call.get("to") or metadata.get("to_number") or "").strip()
         clinic_id = str(metadata.get("clinic_id") or "").strip()
         lead_id = str(metadata.get("lead_id") or "").strip()
+        recording_url = str(call.get("recording_url") or "").strip()
 
         lead = None
         if not lead_id and to_number:
@@ -346,7 +398,9 @@ def main() -> int:
         )
 
         transcript = _normalize_transcript(call)
-        tool_names = _extract_tool_calls(call)
+        tool_events = _extract_tool_events(call)
+        tool_names = [event["name"] for event in tool_events]
+        recording_followup_requests = _extract_recording_followup_requests(tool_events)
         outcome = _call_outcome_from_analysis(call)
         raw_outcome = outcome
 
@@ -358,7 +412,7 @@ def main() -> int:
             outcome_key, conversion_stage = _normalize_call_outcome(raw_outcome, transcript, tool_names)
             call_outcome = outcome_key
 
-        captured_email = _extract_captured_email(call, transcript, tool_names)
+        captured_email = _extract_captured_email(call, transcript, tool_names, tool_events)
         call_status = str(call.get("call_status") or call.get("status") or "").strip().lower() or "unknown"
         sentiment = _sentiment_from_analysis(call)
         duration = call.get("duration_ms")
@@ -375,7 +429,11 @@ def main() -> int:
             "call_outcome": call_outcome,
             "conversion_stage": conversion_stage,
             "tool_calls": tool_names,
+            "tool_call_events": tool_events,
             "captured_email": captured_email,
+            "recording_url": recording_url,
+            "recording_followup_requested": bool(recording_followup_requests),
+            "recording_followup_requests": recording_followup_requests,
             "attempt_number": attempt_number,
             "attempt_warning_threshold": attempt_warning_threshold,
             "attempts_exceeded_200": attempts_exceeded_200,

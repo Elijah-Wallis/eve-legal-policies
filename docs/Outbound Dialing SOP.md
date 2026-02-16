@@ -139,6 +139,30 @@ Use `.env.retell.example` as the source of truth and copy values into `.env.rete
 - Keep `attempts_exceeded_200=true` as a first-class journey attribute and route high-attempt leads into a separate nurture sequence.
 - Keep existing call scripts and n8n integrations additive, but keep workflow control simple: `B2B outbound calling workflow` is the only active outbound workflow.
 
+## n8n wiring for recording + Twilio/SMS/email follow-up
+
+Use `recording_followup_requested` as the canonical branch key from mapped outcomes.
+
+- Expected event inputs:
+  - `recording_followup_requested` (`true|false`)
+  - `recording_followup_requests` (array)
+  - `recording_url`
+  - `campaign_id`, `tenant`, `lead_id`, `clinic_id`, `call_id`, `to_number`
+
+- Minimal branch contract:
+  - If `recording_followup_requested == true`
+    - branch to follow-up path
+    - send one SMS/WhatsApp message with `recording_url` + short text
+    - send email with same content and link (or signed recording asset)
+    - emit `tool=send_call_recording_followup` follow-up state in your downstream CRM/nurture state
+  - Else continue normal outcome flow (`booked_demo`, `dnc`, `email_captured`, `rejected`, `voicemail`, `unknown`).
+
+- Required node inputs (Twilio + SMTP/Email action):
+  - `to_number` for SMS/WhatsApp
+  - `recipient_email` (fallbacks from `captured_email` + `recording_followup_requests[*].recipient_email`)
+  - `recording_url` (from `call recording_url` or `recording_followup_requests[].recording_url`)
+  - `tenant`, `campaign_id`, `lead_id`, `clinic_id`, `call_id` for idempotent tracking
+
 ## After-hours call policy
 
 - Default call window is `09:00-18:00` from each lead row (`call_hours`).

@@ -132,6 +132,10 @@ Output row contract:
   "call_outcome": "booked_demo",
   "conversion_stage": "booked_demo",
   "tool_calls": ["send_evidence_package","mark_dnc_compliant"],
+  "tool_call_events": [
+    {"name":"send_evidence_package","arguments":{"recipient_email":"manager@acme.example","delivery_method":"EMAIL_AND_SMS"}},
+    {"name":"send_call_recording_followup","arguments":{"campaign_id":"ont-live-001","clinic_id":"123","lead_id":"L-001","call_id":"call_xxx","recording_url":"https://.../recording.wav","recipient_email":"manager@acme.example","channel":"twilio_sms","reason":"queued","next_step":"queued","timestamp_ms":1700000000123}}
+  ],
   "captured_email": "manager@acme.example",
   "call_status": "ended",
   "sentiment": "neutral",
@@ -139,6 +143,10 @@ Output row contract:
   "attempt_number": 3,
   "attempt_warning_threshold": 200,
   "attempts_exceeded_200": false,
+  "recording_followup_requested": true,
+  "recording_followup_requests": [
+    {"tool":"send_call_recording_followup","recording_url":"https://.../recording.wav","channel":"twilio_sms","recipient_email":"manager@acme.example"}
+  ],
   "call_window": "09:00-18:00",
   "call_window_type": "business_hours",
   "after_hours_call_once_done": false,
@@ -149,7 +157,7 @@ Output row contract:
 
 Outcome priority:
 1. `call_analysis.custom_analysis_data.call_outcome`
-2. Tool call markers (`send_evidence_package`, `mark_dnc_compliant`, `set_follow_up_plan`, `log_call_outcome`)
+2. Tool call markers (`send_evidence_package`, `mark_dnc_compliant`, `set_follow_up_plan`, `log_call_outcome`, `send_call_recording_followup`)
 3. transcript heuristic
 
 ## 4) n8n workflow mapping (deployment)
@@ -194,6 +202,21 @@ Mapper can POST:
   "records": [ ...normalized rows... ]
 }
 ```
+
+### Recording follow-up branch in n8n
+
+- Trigger on mapped outcome events from `data/retell_calls/live_customer_journeys.jsonl` webhook.
+- Canonical branch key:
+  - `recording_followup_requested == true`
+  - `recording_followup_requests` array contains one or more requests.
+- Minimum contract to consume:
+  - `tenant`, `campaign_id`, `lead_id`, `clinic_id`, `call_id`, `to_number`
+  - `recording_url` (from Retell `call.json` artifact) or `recording_followup_requests[].recording_url`
+  - `recording_followup_requests[].channel` (`twilio_sms`, `EMAIL`, `EMAIL_AND_SMS`)
+- Recommended action mapping:
+  1. Send WhatsApp/SMS via Twilio node with short message + link to `recording_url`.
+  2. Send email (Twilio SendGrid/Sendinblue) with personal line + `recording_url`.
+  3. Optionally call/update CRM/nurture queue.
 
 ## 6) Supabase export
 

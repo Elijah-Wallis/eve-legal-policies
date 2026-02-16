@@ -114,12 +114,16 @@ Normalized record schema:
 - `call_outcome`
 - `conversion_stage`
 - `tool_calls`
+- `tool_call_events`
 - `captured_email`
 - `call_status`
 - `sentiment`
 - `call_duration_ms`
 - `transcript_hash`
 - `outcome_ts`
+- `recording_url`
+- `recording_followup_requested`
+- `recording_followup_requests`
 
 Example:
 
@@ -134,7 +138,13 @@ Example:
   "call_outcome": "booked_demo",
   "conversion_stage": "booked_demo",
   "tool_calls": ["send_evidence_package", "set_follow_up_plan"],
+  "tool_call_events": [{"name":"send_call_recording_followup","arguments":{"campaign_id":"ont-smoke-001","recording_url":"https://.../recording.wav","channel":"twilio_sms"}}],
   "captured_email": "manager@acme.example",
+  "recording_url": "https://.../recording.wav",
+  "recording_followup_requested": true,
+  "recording_followup_requests": [
+    {"tool":"send_call_recording_followup","recording_url":"https://.../recording.wav","channel":"twilio_sms"}
+  ],
   "call_status": "ended",
   "sentiment": "neutral",
   "call_duration_ms": 12000,
@@ -144,7 +154,7 @@ Example:
 
 Outcome priority in mapper:
 1. `call_analysis.custom_analysis_data.call_outcome`
-2. tool call markers (`send_evidence_package`, `mark_dnc_compliant`)
+2. tool call markers (`send_evidence_package`, `mark_dnc_compliant`, `send_call_recording_followup`)
 3. transcript heuristic
 
 ## 5) n8n outcome webhook

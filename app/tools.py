@@ -91,6 +91,7 @@ class ToolRegistry:
             "clinic_policies": self._clinic_policies,
             "send_evidence_package": self._send_evidence_package,
             "mark_dnc_compliant": self._mark_dnc_compliant,
+            "send_call_recording_followup": self._send_call_recording_followup,
             "log_call_outcome": self._log_call_outcome,
             "set_follow_up_plan": self._set_follow_up_plan,
             "run_shell_command": self._run_shell_command,
@@ -261,6 +262,46 @@ class ToolRegistry:
             "stderr": (result.stderr or "")[:1200],
         }
         return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+    async def _send_call_recording_followup(self, arguments: dict[str, Any]) -> str:
+        tenant = str(arguments.get("tenant", "synthetic_medspa")).strip()
+        campaign_id = str(arguments.get("campaign_id", "")).strip()
+        clinic_id = str(arguments.get("clinic_id", "")).strip()
+        lead_id = str(arguments.get("lead_id", "")).strip()
+        call_id = str(arguments.get("call_id", "")).strip()
+        to_number = str(arguments.get("to_number", "")).strip()
+        call_recording_url = str(arguments.get("recording_url", arguments.get("call_recording_url", "") )).strip()
+        recipient_email = str(arguments.get("recipient_email", "")).strip()
+        recipient_phone = str(arguments.get("recipient_phone", "")).strip()
+        reason = str(arguments.get("reason", "queued")).strip().lower() or "queued"
+        channel = str(arguments.get("channel", arguments.get("channels", ""))).strip().lower() or "twilio_sms"
+        next_step = str(arguments.get("next_step", "queued")).strip() or "queued"
+        timestamp_ms = int(arguments.get("timestamp_ms", 0) or 0)
+        if not timestamp_ms:
+            timestamp_ms = int(time.time() * 1000)
+
+        return json.dumps(
+            {
+                "ok": True,
+                "tool": "send_call_recording_followup",
+                "status": "acknowledged",
+                "reason": reason,
+                "tenant": tenant,
+                "campaign_id": campaign_id,
+                "clinic_id": clinic_id,
+                "lead_id": lead_id,
+                "call_id": call_id,
+                "to_number": to_number,
+                "recipient_phone": recipient_phone,
+                "recipient_email": recipient_email,
+                "channel": channel,
+                "recording_url": call_recording_url,
+                "next_step": next_step,
+                "timestamp_ms": timestamp_ms,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     async def _send_evidence_package(self, arguments: dict[str, Any]) -> str:
         recipient_email = str(arguments.get("recipient_email", "")).strip()
