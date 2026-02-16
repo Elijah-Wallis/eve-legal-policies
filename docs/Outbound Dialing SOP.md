@@ -28,10 +28,14 @@ Local reference for the end-to-end live outbound loop in this repo:
   - leads above threshold are flagged with `attempts_exceeded_200=true`
 - Stop reasons (hard skip):
   - `dnc,closed,invalid,contacted,booked`
-- N8N workflow contract:
-  - Canonical outbound workflow: `openclaw_retell_call_dispatch`
-  - Legacy/auxiliary workflow: `openclaw_retell_fn_b2c_quote` (do not use for outbound dispatch)
+- N8N workflow contract (canonical only):
+  - Canonical outbound workflow: `B2B outbound calling workflow`
+  - Legacy helper workflow: `openclaw_retell_fn_b2c_quote` (deprecated; do not send leads here)
   - Dispatch webhook: `N8N_B2B_DISPATCH_WEBHOOK` (`/webhook/openclaw-retell-dispatch`)
+- Deterministic workflow contract:
+  - One input source: `live_call_queue.jsonl` records from `scripts/build_live_campaign_queue.py`
+  - One output schema: `scripts/run_live_campaign.py` dispatch payload metadata + final journey events from `scripts/synthetic_journey_mapper.py`
+  - One terminal outcome path: `booked`, `dnc`, `rejected`, `contacted_closed` (all route to terminal outcome branches only)
 - Resume behavior:
   - `--resume` skips leads already present in dispatch state
 
@@ -94,7 +98,7 @@ Use `.env.retell.example` as the source of truth and copy values into `.env.rete
   - `APIFY_API_TOKEN`
 - n8n
   - `N8N_LEAD_WEBHOOK_URL`
-  - `N8N_B2B_DISPATCH_WORKFLOW`
+- `N8N_B2B_DISPATCH_WORKFLOW` (set to `B2B outbound calling workflow`)
   - `N8N_B2B_DISPATCH_WEBHOOK`
   - `N8N_B2B_OUTCOME_WORKFLOW`
   - `N8N_B2B_OUTCOME_WEBHOOK`
@@ -116,4 +120,4 @@ Use `.env.retell.example` as the source of truth and copy values into `.env.rete
 ## Notes for future rollout
 
 - Keep `attempts_exceeded_200=true` as a first-class journey attribute and route high-attempt leads into a separate nurture sequence.
-- Keep existing call scripts and n8n integrations additive; deprecate old outbound workflows by aliasing to this contract and updating triggers only.
+- Keep existing call scripts and n8n integrations additive, but keep workflow control simple: `B2B outbound calling workflow` is the only active outbound workflow.

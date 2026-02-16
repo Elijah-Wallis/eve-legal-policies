@@ -150,13 +150,18 @@ Outcome priority:
 
 Current live workflow in the connected n8n environment:
 
-- `openclaw_retell_call_dispatch` (webhook `/webhook/openclaw-retell-dispatch`, production URL:
+- `B2B outbound calling workflow` (webhook `/webhook/openclaw-retell-dispatch`, production URL:
   `https://elijah-wallis.app.n8n.cloud/webhook/openclaw-retell-dispatch`)
-- `openclaw_retell_fn_b2c_quote` is pricing helper only; keep it as a specialist workflow and treat `openclaw_retell_call_dispatch` as the canonical `b2b_outbound_workflow`.
+- `openclaw_retell_fn_b2c_quote` is deprecated as an outbound workflow; keep only if explicitly needed for non-core pricing tooling, otherwise do not invoke for lead dispatch.
 - Recommended env for this contract:
-  - `N8N_B2B_DISPATCH_WORKFLOW=openclaw_retell_call_dispatch`
+  - `N8N_B2B_DISPATCH_WORKFLOW=B2B outbound calling workflow`
   - `N8N_B2B_DISPATCH_WEBHOOK=https://elijah-wallis.app.n8n.cloud/webhook/openclaw-retell-dispatch`
   - `N8N_B2B_OUTCOME_WORKFLOW` / `N8N_B2B_OUTCOME_WEBHOOK` for conversion pushes.
+
+Workflow control for this version:
+- One input source: Retell call-queue payload from `scripts/run_live_campaign.py`
+- One output schema: one standardized outcome envelope from mapper (`tenant, campaign_id, lead_id, clinic_id, call_id, call_outcome, conversion_stage, ...`)
+- One terminal outcome path: `booked`, `dnc`, `rejected`, `contacted_closed`, `voicemail`, `unknown`
 
 Lead flow:
 - Use `N8N_LEAD_WEBHOOK_URL`/`N8N_B2B_DISPATCH_WEBHOOK` to invoke dispatch workflow.
@@ -206,7 +211,7 @@ Target upsert keys:
 
 The repo provides local orchestration and contracts. You still need:
 
-- n8n workflow for lead intake (already mapped to `openclaw_retell_call_dispatch`)
+- `B2B outbound calling workflow` as the sole active lead intake/dispatch workflow
 - nurture branch for booked outcomes (higher-touch sequence)
 - Twilio tool node config for SMS + email personalization
 - optional email content prompts/safe templates
