@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .clock import RealClock
 from .config import BrainConfig
-from .dashboard_data import build_dashboard_summary, build_repo_map
+from .dashboard_data import build_dashboard_summary, build_outbound_pipeline_status, build_repo_map
 from .metrics import CompositeMetrics, Metrics
 from .orchestrator import Orchestrator
 from .provider import build_llm_client
@@ -84,6 +84,16 @@ async def dashboard_sop() -> JSONResponse:
             "markdown": text,
         }
     )
+
+
+@app.get("/api/dashboard/outbound")
+async def dashboard_outbound_pipeline() -> JSONResponse:
+    payload = build_outbound_pipeline_status(
+        _REPO_ROOT,
+        campaign_id=os.getenv("LIVE_CAMPAIGN_ID", None),
+        tenant=os.getenv("LIVE_TENANT", None),
+    )
+    return JSONResponse(payload)
 
 
 @app.get("/api/dashboard/readme")

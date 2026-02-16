@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Eve Outbound Dialing - Live Dashboard</title>
+  <style>
+    :root {
+      --bg: #071025;
+      --panel: #111a32;
+      --panel-soft: #0e1730;
+      --border: #263b6e;
+      --text: #ebf1ff;
+      --muted: #9db0df;
+      --ok: #1fc27b;
+      --warn: #efb53f;
+      --bad: #f06b6b;
+      --idle: #7f8cb2;
+      --accent: #5fa8ff;
+      --mono: ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(120% 120% at 0% 0%, #14234f 0%, transparent 55%),
+        radial-gradient(120% 120% at 100% 0%, #0f2b61 0%, transparent 45%),
+        var(--bg);
+      color: var(--text);
+    }
+    .frame {
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.4rem, 2.8vw, 1.9rem);
+    }
+    .pulse {
+      height: 10px;
+      width: 10px;
+      border-radius: 99px;
+      background: var(--warn);
+      display: inline-block;
+      margin-right: 8px;
+      animation: pulse 1.1s infinite;
+    }
+    .pulse.ok { background: var(--ok); animation: none; }
+    .pulse.down { background: var(--bad); animation: none; }
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.8; }
+      70% { transform: scale(1.2); opacity: 0.25; }
+      100% { transform: scale(0.9); opacity: 0.9; }
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      background: linear-gradient(180deg, var(--panel-soft), var(--panel));
+      box-shadow: 0 4px 22px rgba(0, 0, 0, 0.25);
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .kpi {
+      margin: 0;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .kpi h3 {
+      margin: 0 0 6px;
+      font-size: 0.88rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .kpi .value {
+      margin: 0;
+      font-size: 1.45rem;
+      font-weight: 700;
+      font-family: var(--mono);
+    }
+    .timeline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .step {
+      flex: 1 1 180px;
+      min-width: 150px;
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 12px;
+      padding: 10px;
+      background: rgba(255,255,255,0.03);
+    }
+    .step .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-bottom: 6px;
+    }
+    .step .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 700;
+      font-size: 0.95rem;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 99px;
+      display: inline-block;
+    }
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.idle { background: var(--idle); }
+    .dot.bad { background: var(--bad); }
+    .mono {
+      font-family: var(--mono);
+      font-size: 0.9rem;
+    }
+    .list {
+      margin: 0;
+      padding-left: 18px;
+      line-height: 1.45;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .chip {
+      display: inline-flex;
+      margin: 4px 6px 0 0;
+      padding: 5px 9px;
+      border-radius: 99px;
+      background: rgba(130, 160, 255, 0.16);
+      border: 1px solid rgba(130, 160, 255, 0.4);
+      font-size: 0.82rem;
+      font-family: var(--mono);
+    }
+    .error {
+      color: var(--bad);
+      font-weight: 700;
+      margin-top: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.93rem;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      text-align: left;
+      padding: 8px 6px;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    td { white-space: nowrap; }
+    .hint {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 0;
+    }
+    .action-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 0;
+      border-radius: 9px;
+      padding: 8px 12px;
+      background: linear-gradient(180deg, #2955cc, #153a9f);
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    @media (max-width: 780px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <div class="top">
+      <div>
+        <h1>🚀 Outbound Dialing Live Dashboard</h1>
+        <p class="hint" id="campaign">Loading campaign...</p>
+      </div>
+      <div class="action-row">
+        <button class="btn" id="startBtn">Open Campaign Start Command</button>
+        <span id="ping" class="pulse"></span><span id="stateText" class="hint">Connecting...</span>
+      </div>
+    </div>
+
+    <section class="card">
+      <div class="timeline" id="timeline"></div>
+    </section>
+
+    <section class="grid">
+      <div class="kpi">
+        <h3>Leads in Queue</h3>
+        <p class="value" id="kpiQueue">—</p>
+      </div>
+      <div class="kpi">
+        <h3>Calls Attempted (Today)</h3>
+        <p class="value" id="kpiDaily">—</p>
+      </div>
+      <div class="kpi">
+        <h3>Call Artifacts</h3>
+        <p class="value" id="kpiCalls">—</p>
+      </div>
+      <div class="kpi">
+        <h3>Mapped Journeys</h3>
+        <p class="value" id="kpiJourneys">—</p>
+      </div>
+      <div class="kpi">
+        <h3>Pipeline State</h3>
+        <p class="value" id="kpiPipeline">—</p>
+      </div>
+    </section>
+
+    <section class="two-col">
+      <article class="card">
+        <h3>Conversion Breakdown</h3>
+        <div id="conversion" class="hint">No data yet.</div>
+      </article>
+      <article class="card">
+        <h3>Call Status</h3>
+        <div id="callStatus" class="hint">No data yet.</div>
+      </article>
+    </section>
+
+    <section class="card">
+      <h3>Latest Calls</h3>
+      <div id="latestError" class="error" style="display:none;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Call ID</th>
+              <th>Clinic</th>
+              <th>To</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="latestCalls">
+            <tr><td colspan="4" class="hint">Waiting for calls...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Segment Overview</h3>
+      <div id="segments"></div>
+    </section>
+
+    <section class="card">
+      <h3>What’s happening under the hood</h3>
+      <ul class="list">
+        <li>1) Build live queue from leads (or Apify/local file).</li>
+        <li>2) Dispatch calls with Retell + metadata for each lead.</li>
+        <li>3) Map outcomes from transcripts into journey events.</li>
+        <li>4) Feed n8n follow-up and nurture actions.</li>
+        <li>5) Export outcomes to Supabase and Ops summaries.</li>
+      </ul>
+      <p class="hint">Tip: keep this running while dialing to confirm each step lights up green.</p>
+    </section>
+  </div>
+
+  <script>
+    const stepLabels = [
+      { key: "intake", label: "Lead Intake Ready" },
+      { key: "dispatch", label: "Retell Dispatch Running" },
+      { key: "mapping", label: "Journey Mapping" },
+      { key: "persistence", label: "Supabase Dispatch" },
+      { key: "nurture", label: "Nurture Signals" },
+    ];
+
+    const statusClassByState = {
+      ok: "ok",
+      running: "warn",
+      idle: "idle",
+      bad: "bad",
+    };
+
+    function fmtInt(v) { return String(Number(v || 0)); }
+
+    function stateDot(state) {
+      return `<span class="dot ${statusClassByState[state] || "idle"}"></span>${state}`;
+    }
+
+    function formatTime(ts) {
+      if (!ts) return "none";
+      const d = new Date(ts * 1000);
+      return d.toLocaleString();
+    }
+
+    function chip(k, v) {
+      return `<span class=\"chip\">${k}: ${v}</span>`;
+    }
+
+    async function fetchStatus() {
+      try {
+        const [statusRes, summaryRes] = await Promise.all([
+          fetch("/api/dashboard/outbound", { cache: "no-store" }),
+          fetch("/api/dashboard/summary", { cache: "no-store" }),
+        ]);
+        const status = await statusRes.json();
+        const summary = await summaryRes.json();
+
+        document.getElementById("campaign").textContent =
+          `Campaign: ${status.campaign_id || "unknown"} • Tenant: ${status.tenant || "unknown"}`;
+
+        const ping = document.getElementById("ping");
+        const pingText = document.getElementById("stateText");
+        if (summary && summary.status) {
+          if (summary.status === "green") {
+            ping.className = "pulse ok";
+            pingText.textContent = "Dashboard API: healthy";
+          } else if (summary.status === "red") {
+            ping.className = "pulse bad";
+            pingText.textContent = "Dashboard API: check alerts";
+          } else {
+            ping.className = "pulse";
+            pingText.textContent = "Dashboard API: warning";
+          }
+        } else {
+          ping.className = "pulse";
+          pingText.textContent = "Fetching…";
+        }
+
+        document.getElementById("kpiQueue").textContent = fmtInt(status.intake?.queue_size);
+        document.getElementById("kpiDaily").textContent = `${fmtInt(status.dispatch?.daily_count)} / ${fmtInt(status.dispatch?.call_window_caps?.daily_call_cap)} today`;
+        document.getElementById("kpiCalls").textContent = fmtInt(status.transcripts?.call_artifact_count);
+        document.getElementById("kpiJourneys").textContent = fmtInt(status.journeys?.count);
+        document.getElementById("kpiPipeline").textContent = status.pipeline_health?.stage || "idle";
+
+        const timeline = document.getElementById("timeline");
+        timeline.innerHTML = "";
+        stepLabels.forEach((step) => {
+          const s = status.step_status?.[step.key] || "idle";
+          const node = document.createElement("div");
+          node.className = "step";
+          node.innerHTML = `<div class="label">${step.label}</div>
+                           <div class="status">${stateDot(s)} <span>${step.key}</span></div>`;
+          timeline.appendChild(node);
+        });
+
+        const conversion = document.getElementById("conversion");
+        const conversionCounts = status.journeys?.conversion_counts || {};
+        if (Object.keys(conversionCounts).length) {
+          conversion.innerHTML = Object.entries(conversionCounts)
+            .map(([k, v]) => chip(k, v))
+            .join(" ");
+        } else {
+          conversion.textContent = "No mapped journeys yet.";
+        }
+
+        const callStatus = document.getElementById("callStatus");
+        const statusCounts = status.transcripts?.call_status_counts || {};
+        if (Object.keys(statusCounts).length) {
+          callStatus.innerHTML = Object.entries(statusCounts)
+            .map(([k, v]) => chip(k, v))
+            .join(" ");
+        } else {
+          callStatus.textContent = "No call artifacts yet.";
+        }
+
+        const segments = document.getElementById("segments");
+        const segmentMap = status.intake?.segments || {};
+        segments.innerHTML = Object.keys(segmentMap).length
+          ? Object.entries(segmentMap).map(([k, v]) => chip(k, v)).join(" ")
+          : "<span class='hint'>No segment metadata yet.</span>";
+
+        const latestCalls = document.getElementById("latestCalls");
+        const calls = status.transcripts?.latest_calls || [];
+        if (!calls.length) {
+          latestCalls.innerHTML = "<tr><td colspan='4' class='hint'>Waiting for calls...</td></tr>";
+        } else {
+          latestCalls.innerHTML = calls.map((row) => {
+            const callId = row.call_id || "-";
+            const name = row.clinic_name || "-";
+            const num = row.to_number || "-";
+            const st = row.status || "-";
+            return `<tr>
+              <td class=\"mono\">${callId}</td>
+              <td>${name}</td>
+              <td>${num}</td>
+              <td>${st}</td>
+            </tr>`;
+          }).join("");
+        }
+
+        const errEl = document.getElementById("latestError");
+        if (status.intake?.queue_file) {
+          errEl.style.display = "none";
+          if (!document.title.includes("Live")) {
+            document.title = "Eve Outbound Dialing - Live Dashboard";
+          }
+          errEl.style.display = "none";
+          errEl.textContent = "";
+        } else {
+          errEl.textContent = "Missing queue state files.";
+          errEl.style.display = "block";
+        }
+      } catch (err) {
+        const ping = document.getElementById("ping");
+        const pingText = document.getElementById("stateText");
+        ping.className = "pulse bad";
+        pingText.textContent = "Dashboard API error";
+        console.error(err);
+      }
+    }
+
+    const btn = document.getElementById("startBtn");
+    btn.addEventListener("click", async () => {
+      const text = "make start";
+      try {
+        await navigator.clipboard.writeText(text);
+        const old = btn.textContent;
+        btn.textContent = "Copied: make start";
+        setTimeout(() => (btn.textContent = old), 1600);
+      } catch (_) {
+        btn.textContent = "Run: make start";
+      }
+    });
+
+    fetchStatus();
+    setInterval(fetchStatus, 3000);
+  </script>
+</body>
+</html>

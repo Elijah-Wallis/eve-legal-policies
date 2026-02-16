@@ -1,4 +1,4 @@
-.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase live-build-queue live-call-batch live-map-journeys live-export-supabase omni-gate-start omni-gate-eod
+.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase live-build-queue live-call-batch live-map-journeys live-export-supabase omni-gate-start omni-gate-eod start-outbound-dialing start-outbound-dialing-eod start
 
 LEARN_APPLY_FLAG := $(if $(filter true 1,$(RETELL_LEARN_APPLY)),--apply,--no-apply)
 
@@ -31,8 +31,11 @@ help:
 	@echo "  make live-call-batch       # run live outbound calls from live queue"
 	@echo "  make live-map-journeys     # normalize Retell calls into live journey rows"
 	@echo "  make live-export-supabase  # export live journey rows into Supabase"
+	@echo "  make start                 # same as start-outbound-dialing"
 	@echo "  make omni-gate-start       # daily start sequence for outbound system"
 	@echo "  make omni-gate-eod         # end-of-day metrics and outcome summary"
+	@echo "  make start-outbound-dialing # one-command start for live outbound dialing (with concurrency)"
+	@echo "  make start-outbound-dialing-eod # one-command end-of-day processing for live outbound dialing"
 	@echo "  make self-improve          # run safe self-improvement cycle (propose)"
 	@echo "  make skill-capture ID=... INTENT=... [TESTS=...]"
 	@echo "  make skill-validate PATH=skills/<file>.md"
@@ -209,3 +212,12 @@ omni-gate-eod:
 	@python3 scripts/revenue_ops_loop.py \
 		--calls-dir data/retell_calls \
 		--push-webhook "$${N8N_OUTCOME_WEBHOOK_URL:-}"
+
+start-outbound-dialing:
+	@$(MAKE) omni-gate-start
+
+start-outbound-dialing-eod:
+	@$(MAKE) omni-gate-eod
+
+start:
+	@$(MAKE) start-outbound-dialing
