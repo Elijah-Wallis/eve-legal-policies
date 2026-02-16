@@ -524,8 +524,9 @@
         </article>
       </div>
 
-      <div class="call-detail-card detail-card" style="margin-top: 10px;">
+  <div class="call-detail-card detail-card" style="margin-top: 10px;">
         <h4>Transcript</h4>
+        <div id="callTranscriptLink" class="detail-line" style="margin-bottom: 8px;"></div>
         <div id="callTranscript" class="transcript-log">No transcript loaded.</div>
       </div>
     </div>
@@ -564,6 +565,10 @@
     }
 
     function closeCallDetail() {
+      if (window.__retellTranscriptUrl) {
+        URL.revokeObjectURL(window.__retellTranscriptUrl);
+        window.__retellTranscriptUrl = null;
+      }
       const modal = document.getElementById("callDetailModal");
       modal.classList.remove("open");
       state.detailOpen = false;
@@ -683,6 +688,7 @@
       const tools = document.getElementById("callTools");
       const outcome = document.getElementById("callOutcome");
       const recording = document.getElementById("callRecordingLink");
+      const transcriptLink = document.getElementById("callTranscriptLink");
       const transcript = document.getElementById("callTranscript");
 
       const business = call.clinic_name || "Unknown business";
@@ -690,6 +696,9 @@
       const to = call.to_number || "—";
       const from = call.from_number || "—";
       const duration = msToSeconds(call.duration_ms);
+      const transcriptText = Array.isArray(call.transcript_lines) && call.transcript_lines.length
+        ? call.transcript_lines.join("\n")
+        : String(call.transcript || "").trim();
 
       title.textContent = business;
       sub.textContent = `Call ID: ${callId}`;
@@ -718,8 +727,23 @@
 
       if (call.recording_url) {
         recording.innerHTML = `<a href=\"${escapeHtml(call.recording_url)}\" target=\"_blank\" rel=\"noreferrer\">Open recording</a>`;
+      } else if (call.recording_multi_channel_url) {
+        recording.innerHTML = `<a href=\"${escapeHtml(call.recording_multi_channel_url)}\" target=\"_blank\" rel=\"noreferrer\">Open recording (multi-channel)</a>`;
       } else {
         recording.textContent = "No recording artifact yet.";
+      }
+
+      if (transcriptText) {
+        if (window.__retellTranscriptUrl) {
+          URL.revokeObjectURL(window.__retellTranscriptUrl);
+          window.__retellTranscriptUrl = null;
+        }
+        window.__retellTranscriptUrl = URL.createObjectURL(new Blob([transcriptText], { type: "text/plain;charset=utf-8" }));
+        transcriptLink.innerHTML = `<a href=\"${escapeHtml(window.__retellTranscriptUrl)}\" target=\"_blank\" rel=\"noreferrer\">Open transcript</a>`;
+      } else if (call.public_log_url) {
+        transcriptLink.innerHTML = `<a href=\"${escapeHtml(call.public_log_url)}\" target=\"_blank\" rel=\"noreferrer\">Open transcript source</a>`;
+      } else {
+        transcriptLink.textContent = "No transcript artifact yet.";
       }
 
       if (Array.isArray(call.transcript_lines) && call.transcript_lines.length) {
@@ -847,7 +871,7 @@
             const st = row.status || "-";
             const transcript = row.transcript_snippet || "";
             const transcriptLink = callId !== "-"
-              ? `<a href="#" class="transcript-link" data-call-id="${escapeHtml(callId)}">Transcript</a>`
+              ? `<a href="#" class=\"transcript-link\" data-call-id=\"${escapeHtml(callId)}\">Open full call artifact</a>`
               : "<span class=\"hint\">Transcript</span>";
             return `<tr>
               <td>
