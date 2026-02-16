@@ -48,6 +48,12 @@ class SlotState:
     b2b_last_signal: str = ""
     b2b_no_signal_streak: int = 0
     b2b_last_user_signature: str = ""
+    campaign_id: Optional[str] = None
+    clinic_id: Optional[str] = None
+    clinic_name: Optional[str] = None
+    lead_id: Optional[str] = None
+    to_number: Optional[str] = None
+    tenant: Optional[str] = None
 
     reprompts: dict[str, int] = field(default_factory=dict)
     b2b_autonomy_mode: str = "baseline"
@@ -733,6 +739,27 @@ def _advance_b2b_state_and_payload(
     }
 
 
+def _build_recording_followup_tool_request(
+    state: SlotState, *, call_id: str, reason: str = "call_progress"
+) -> ToolRequest:
+    return ToolRequest(
+        name="send_call_recording_followup",
+        arguments={
+            "tenant": str(state.tenant or "synthetic_medspa").strip(),
+            "campaign_id": str(state.campaign_id or "").strip(),
+            "clinic_id": str(state.clinic_id or "").strip(),
+            "lead_id": str(state.lead_id or "").strip(),
+            "call_id": str(call_id or "").strip(),
+            "to_number": str(state.to_number or state.phone or "").strip(),
+            "recipient_email": str(state.manager_email or "").strip(),
+            "recipient_phone": str(state.phone or "").strip(),
+            "channel": "twilio_sms",
+            "next_step": "recording_followup",
+            "reason": reason,
+        },
+    )
+
+
 def decide_action(
     *,
     state: SlotState,
@@ -740,6 +767,7 @@ def decide_action(
     needs_apology: bool,
     safety_kind: str,
     safety_message: str,
+    call_id: str = "",
     profile: str = "clinic",
 ) -> DialogueAction:
     """
@@ -948,7 +976,12 @@ def decide_action(
                     }
                 ),
                 tool_requests=[
-                    ToolRequest(name="mark_dnc_compliant", arguments={"reason": "USER_REQUEST"})
+                    ToolRequest(name="mark_dnc_compliant", arguments={"reason": "USER_REQUEST"}),
+                    _build_recording_followup_tool_request(
+                        state,
+                        call_id=call_id,
+                        reason="explicit_rejection",
+                    ),
                 ],
             )
 
@@ -1025,7 +1058,12 @@ def decide_action(
                     }
                 ),
                 tool_requests=[
-                    ToolRequest(name="mark_dnc_compliant", arguments={"reason": "USER_REQUEST"})
+                    ToolRequest(name="mark_dnc_compliant", arguments={"reason": "USER_REQUEST"}),
+                    _build_recording_followup_tool_request(
+                        state,
+                        call_id=call_id,
+                        reason="journey_end",
+                    ),
                 ],
             )
 

@@ -449,6 +449,12 @@ class Orchestrator:
             b2b_last_signal=str(s.b2b_last_signal or ""),
             b2b_no_signal_streak=int(s.b2b_no_signal_streak or 0),
             b2b_last_user_signature=str(s.b2b_last_user_signature or ""),
+            campaign_id=str(s.campaign_id or ""),
+            clinic_id=str(s.clinic_id or ""),
+            clinic_name=str(s.clinic_name or ""),
+            lead_id=str(s.lead_id or ""),
+            to_number=str(s.to_number or ""),
+            tenant=str(s.tenant or ""),
             reprompts=dict(getattr(s, "reprompts", {}) or {}),
             b2b_autonomy_mode=str(s.b2b_autonomy_mode or "baseline"),
             question_depth=int(s.question_depth or 1),
@@ -469,6 +475,12 @@ class Orchestrator:
         s.b2b_last_signal = str(snap.b2b_last_signal or "")
         s.b2b_no_signal_streak = int(snap.b2b_no_signal_streak or 0)
         s.b2b_last_user_signature = str(snap.b2b_last_user_signature or "")
+        s.campaign_id = str(snap.campaign_id or "")
+        s.clinic_id = str(snap.clinic_id or "")
+        s.clinic_name = str(snap.clinic_name or "")
+        s.lead_id = str(snap.lead_id or "")
+        s.to_number = str(snap.to_number or "")
+        s.tenant = str(snap.tenant or "")
         s.reprompts = dict(getattr(snap, "reprompts", {}) or {})
         s.b2b_autonomy_mode = str(snap.b2b_autonomy_mode or "baseline")
         s.question_depth = int(snap.question_depth or 1)
@@ -550,6 +562,68 @@ class Orchestrator:
     # Inbound handlers
     # ---------------------------------------------------------------------
 
+    def _ingest_call_details(self, call: Any) -> None:
+        if not isinstance(call, dict):
+            return
+
+        metadata = call.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        def _pick(*vals: Any) -> str:
+            for v in vals:
+                if isinstance(v, str):
+                    v = v.strip()
+                    if v:
+                        return v
+            return ""
+
+        campaign_id = _pick(
+            metadata.get("campaign_id"),
+            metadata.get("campaignId"),
+            call.get("campaign_id"),
+            self._slot_state.campaign_id,
+        )
+        clinic_id = _pick(
+            metadata.get("clinic_id"),
+            metadata.get("clinicId"),
+            call.get("clinic_id"),
+            self._slot_state.clinic_id,
+        )
+        clinic_name = _pick(
+            metadata.get("clinic_name"),
+            metadata.get("clinicName"),
+            call.get("clinic_name"),
+            self._slot_state.clinic_name,
+        )
+        lead_id = _pick(
+            metadata.get("lead_id"),
+            metadata.get("leadId"),
+            call.get("lead_id"),
+            self._slot_state.lead_id,
+        )
+        tenant = _pick(
+            metadata.get("tenant"),
+            call.get("tenant"),
+            self._slot_state.tenant,
+            "synthetic_medspa",
+        )
+        to_number = _pick(
+            metadata.get("to_number"),
+            metadata.get("clinic_phone"),
+            call.get("to_number"),
+            call.get("to"),
+            metadata.get("to"),
+        )
+
+        self._slot_state.campaign_id = campaign_id
+        self._slot_state.clinic_id = clinic_id
+        self._slot_state.clinic_name = clinic_name
+        self._slot_state.lead_id = lead_id
+        self._slot_state.tenant = tenant
+        if to_number:
+            self._slot_state.to_number = to_number
+
     async def _handle_inbound_event(self, ev: Any) -> None:
         # Terminal means terminal.
         if self._conv_state == ConvState.ENDED:
@@ -576,7 +650,7 @@ class Orchestrator:
             return
 
         if isinstance(ev, InboundCallDetails):
-            # No-op for now; call details are for tools/policy enrichment.
+            self._ingest_call_details(ev.call)
             return
 
         if isinstance(ev, InboundClear):
@@ -816,6 +890,7 @@ class Orchestrator:
             needs_apology=self._needs_apology,
             safety_kind=safety.kind,
             safety_message=safety.message,
+            call_id=self._call_id,
             profile=self._config.conversation_profile,
         )
 
@@ -1228,6 +1303,13 @@ class Orchestrator:
                     phone_confirmed=self._slot_state.phone_confirmed,
                     requested_dt=self._slot_state.requested_dt,
                     requested_dt_confirmed=self._slot_state.requested_dt_confirmed,
+                    manager_email=self._slot_state.manager_email,
+                    campaign_id=self._slot_state.campaign_id,
+                    clinic_id=self._slot_state.clinic_id,
+                    clinic_name=self._slot_state.clinic_name,
+                    lead_id=self._slot_state.lead_id,
+                    to_number=self._slot_state.to_number,
+                    tenant=self._slot_state.tenant,
                     reprompts=dict(self._slot_state.reprompts or {}),
                     b2b_funnel_stage=self._slot_state.b2b_funnel_stage,
                     b2b_autonomy_mode=self._slot_state.b2b_autonomy_mode,
@@ -1252,6 +1334,7 @@ class Orchestrator:
                     needs_apology=False,
                     safety_kind=safety.kind,
                     safety_message=safety.message,
+                    call_id=self._call_id,
                     profile=self._config.conversation_profile,
                 )
                 objection = detect_objection(last_user)
