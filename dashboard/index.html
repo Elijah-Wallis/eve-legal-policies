@@ -164,6 +164,9 @@
       border-collapse: collapse;
       font-size: 0.93rem;
     }
+    .table-wrap {
+      overflow-x: auto;
+    }
     th, td {
       border-bottom: 1px solid rgba(255,255,255,0.08);
       text-align: left;
@@ -174,10 +177,108 @@
       font-weight: 600;
     }
     td { white-space: nowrap; }
+    .business-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .business-link:hover {
+      text-decoration: underline;
+    }
+    .transcript-cell {
+      max-width: 390px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--text);
+      font-size: 0.85rem;
+    }
     .hint {
       color: var(--muted);
       font-size: 0.9rem;
       margin: 0;
+    }
+    .call-id-badge {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      display: block;
+      margin-top: 4px;
+    }
+    .call-detail-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 16, 37, 0.88);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      padding: 16px;
+    }
+    .call-detail-modal.open {
+      display: flex;
+    }
+    .call-detail-panel {
+      width: min(980px, 100%);
+      background: linear-gradient(180deg, var(--panel-soft), var(--panel));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      max-height: 90vh;
+      overflow: auto;
+      box-shadow: 0 12px 38px rgba(0, 0, 0, 0.45);
+    }
+    .call-detail-head {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .close-detail {
+      border: 0;
+      background: rgba(255,255,255,0.1);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .call-detail-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .detail-card {
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 8px;
+      background: rgba(255,255,255,0.03);
+    }
+    .detail-card h4 {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 0.84rem;
+      font-weight: 600;
+    }
+    .detail-line {
+      margin: 3px 0;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+    }
+    .transcript-log {
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 8px;
+      margin-top: 10px;
+      background: rgba(255,255,255,0.03);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 300px;
+      overflow: auto;
+      font-size: 0.84rem;
+      line-height: 1.35;
     }
     .action-row {
       display: flex;
@@ -257,9 +358,9 @@
         <table>
           <thead>
             <tr>
-              <th>Call ID</th>
-              <th>Clinic</th>
+              <th>Business</th>
               <th>To</th>
+              <th>Transcript</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -288,6 +389,41 @@
     </section>
   </div>
 
+  <div class="call-detail-modal" id="callDetailModal" aria-live="polite" role="dialog" aria-modal="true" aria-labelledby="callDetailTitle">
+    <div class="call-detail-panel">
+      <div class="call-detail-head">
+        <div>
+          <h2 id="callDetailTitle" style="margin:0 0 2px;font-size:1.1rem;">Call Detail</h2>
+          <p id="callDetailSub" class="hint" style="margin:0;">Loading call artifact...</p>
+        </div>
+        <button class="close-detail" id="closeCallDetail">Close</button>
+      </div>
+
+      <div class="call-detail-meta">
+        <article class="detail-card">
+          <h4>Call Meta</h4>
+          <div id="callMetaLine1" class="detail-line"></div>
+          <div id="callMetaLine2" class="detail-line"></div>
+          <div id="callMetaLine3" class="detail-line"></div>
+        </article>
+        <article class="detail-card">
+          <h4>Tool Calls</h4>
+          <div id="callTools" class="detail-line"></div>
+        </article>
+        <article class="detail-card">
+          <h4>Outcome</h4>
+          <div id="callOutcome" class="detail-line"></div>
+          <div id="callRecordingLink" class="detail-line"></div>
+        </article>
+      </div>
+
+      <div class="call-detail-card detail-card" style="margin-top: 10px;">
+        <h4>Transcript</h4>
+        <div id="callTranscript" class="transcript-log">No transcript loaded.</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const stepLabels = [
       { key: "intake", label: "Lead Intake Ready" },
@@ -304,16 +440,119 @@
       bad: "bad",
     };
 
+    const state = {
+      detailOpen: false,
+    };
+
     function fmtInt(v) { return String(Number(v || 0)); }
+
+    function escapeHtml(value) {
+      const s = String(value == null ? "" : value);
+      return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    }
+
+    function closeCallDetail() {
+      const modal = document.getElementById("callDetailModal");
+      modal.classList.remove("open");
+      state.detailOpen = false;
+    }
+
+    function msToSeconds(ms) {
+      const v = Number(ms);
+      if (!Number.isFinite(v)) return "—";
+      return `${Math.round(v / 1000)}s`;
+    }
+
+    function formatCallTime(ts) {
+      if (!ts) return "—";
+      const d = new Date(typeof ts === "number" ? ts * 1000 : ts);
+      if (Number.isNaN(d.getTime())) {
+        return "—";
+      }
+      return d.toLocaleString();
+    }
+
+    function renderCallDetail(call) {
+      const title = document.getElementById("callDetailTitle");
+      const sub = document.getElementById("callDetailSub");
+      const meta1 = document.getElementById("callMetaLine1");
+      const meta2 = document.getElementById("callMetaLine2");
+      const meta3 = document.getElementById("callMetaLine3");
+      const tools = document.getElementById("callTools");
+      const outcome = document.getElementById("callOutcome");
+      const recording = document.getElementById("callRecordingLink");
+      const transcript = document.getElementById("callTranscript");
+
+      const business = call.clinic_name || call.call_id || "Unknown business";
+      const callId = call.call_id || "—";
+      const to = call.to_number || "—";
+      const from = call.from_number || "—";
+      const duration = msToSeconds(call.duration_ms);
+
+      title.textContent = business;
+      sub.textContent = `Call ID: ${callId}`;
+      meta1.textContent = `To: ${to} · From: ${from}`;
+      meta2.textContent = `Status: ${call.status || "unknown"}`;
+      meta3.textContent = `Duration: ${duration}`;
+
+      if (Array.isArray(call.tool_calls) && call.tool_calls.length) {
+        tools.innerHTML = call.tool_calls
+          .map((tool) => `<div>${escapeHtml(String(tool?.tool_name || tool?.name || JSON.stringify(tool)))}</div>`)
+          .join("");
+      } else {
+        tools.innerHTML = "<span class=\"hint\">No tool calls.</span>";
+      }
+
+      const callSummary = call.call_analysis && call.call_analysis.call_summary ? call.call_analysis.call_summary : "—";
+      const callSuccessful = call.call_analysis && call.call_analysis.call_successful === false
+        ? "No"
+        : (call.call_analysis && call.call_analysis.call_successful === true
+            ? "Yes"
+            : "—");
+      outcome.innerHTML = `<div class=\"detail-line\">Summary: ${escapeHtml(callSummary)}</div>
+                          <div class=\"detail-line\">Call successful: ${escapeHtml(callSuccessful)}</div>
+                          <div class=\"detail-line\">Started: ${escapeHtml(formatCallTime(call.call_started_at))}</div>
+                          <div class=\"detail-line\">Ended: ${escapeHtml(formatCallTime(call.call_ended_at))}</div>`;
+
+      if (call.recording_url) {
+        recording.innerHTML = `<a href=\"${escapeHtml(call.recording_url)}\" target=\"_blank\" rel=\"noreferrer\">Open recording</a>`;
+      } else {
+        recording.textContent = "No recording artifact yet.";
+      }
+
+      if (Array.isArray(call.transcript_lines) && call.transcript_lines.length) {
+        transcript.innerHTML = call.transcript_lines
+          .map((line) => `<div class=\"detail-line\">${escapeHtml(line)}</div>`)
+          .join("");
+      } else if (call.transcript) {
+        transcript.textContent = call.transcript;
+      } else {
+        transcript.textContent = "No transcript available.";
+      }
+    }
+
+    async function openCallDetail(callId) {
+      if (!callId) return;
+      try {
+        const res = await fetch(`/api/dashboard/call-detail?call_id=${encodeURIComponent(callId)}`, { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error("Could not load call details.");
+        }
+        const payload = await res.json();
+        if (!payload.ok || !payload.call) {
+          throw new Error("Call record not found.");
+        }
+        renderCallDetail(payload.call);
+        const modal = document.getElementById("callDetailModal");
+        modal.classList.add("open");
+        state.detailOpen = true;
+      } catch (err) {
+        console.error(err);
+      }
+    }
 
     function stateDot(state) {
       return `<span class="dot ${statusClassByState[state] || "idle"}"></span>${state}`;
-    }
-
-    function formatTime(ts) {
-      if (!ts) return "none";
-      const d = new Date(ts * 1000);
-      return d.toLocaleString();
     }
 
     function chip(k, v) {
@@ -403,10 +642,14 @@
             const name = row.clinic_name || "-";
             const num = row.to_number || "-";
             const st = row.status || "-";
+            const transcript = row.transcript_snippet || "";
             return `<tr>
-              <td class=\"mono\">${callId}</td>
-              <td>${name}</td>
+              <td>
+                <a href=\"#\" class=\"business-link\" data-call-id=\"${escapeHtml(callId)}\">${escapeHtml(name)}</a>
+                <span class=\"call-id-badge\">${escapeHtml(callId)}</span>
+              </td>
               <td>${num}</td>
+              <td class=\"transcript-cell\" title=\"${escapeHtml(transcript)}\">${escapeHtml(transcript) || "-"}</td>
               <td>${st}</td>
             </tr>`;
           }).join("");
@@ -443,6 +686,34 @@
         setTimeout(() => (btn.textContent = old), 1600);
       } catch (_) {
         btn.textContent = "Run: make start";
+      }
+    });
+
+    const latestCallsTable = document.getElementById("latestCalls");
+    latestCallsTable.addEventListener("click", (event) => {
+      const anchor = event.target.closest(".business-link");
+      if (!anchor) {
+        return;
+      }
+      event.preventDefault();
+      const callId = anchor.dataset.callId;
+      if (!callId || callId === "-") {
+        return;
+      }
+      openCallDetail(callId);
+    });
+
+    const closeBtn = document.getElementById("closeCallDetail");
+    const modal = document.getElementById("callDetailModal");
+    closeBtn.addEventListener("click", closeCallDetail);
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        closeCallDetail();
+      }
+    });
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && state.detailOpen) {
+        closeCallDetail();
       }
     });
 

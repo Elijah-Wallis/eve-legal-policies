@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .clock import RealClock
 from .config import BrainConfig
-from .dashboard_data import build_dashboard_summary, build_outbound_pipeline_status, build_repo_map
+from .dashboard_data import build_dashboard_summary, build_outbound_pipeline_status, build_repo_map, load_call_detail
 from .metrics import CompositeMetrics, Metrics
 from .orchestrator import Orchestrator
 from .provider import build_llm_client
@@ -94,6 +94,34 @@ async def dashboard_outbound_pipeline() -> JSONResponse:
         tenant=os.getenv("LIVE_TENANT", None),
     )
     return JSONResponse(payload)
+
+
+@app.get("/api/dashboard/call-detail")
+async def dashboard_call_detail(
+    call_id: str | None = None,
+    clinic_id: str | None = None,
+    to_number: str | None = None,
+) -> JSONResponse:
+    calls_dir = _REPO_ROOT / "data" / "retell_calls"
+    if not call_id and not clinic_id and not to_number:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "one of call_id, clinic_id, or to_number is required",
+            },
+            status_code=400,
+        )
+
+    call = load_call_detail(calls_dir, call_id=call_id, clinic_id=clinic_id, to_number=to_number)
+    if call is None:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "call artifact not found",
+            },
+            status_code=404,
+        )
+    return JSONResponse({"ok": True, "call": call})
 
 
 @app.get("/api/dashboard/readme")
