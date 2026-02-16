@@ -14,6 +14,8 @@ from urllib.request import Request, urlopen
 
 
 PHONE_RE = re.compile(r"[^0-9+]")
+MAX_CALLS_CLAMP = 2000
+MAX_CONCURRENCY_CLAMP = 100
 
 
 def _normalize_phone(v: Any) -> str:
@@ -104,6 +106,77 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _coerce_int(value: Any, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
+    try:
+        coerced = int(value)
+    except Exception:
+        return default
+    if min_value is not None and coerced < min_value:
+        coerced = min_value
+    if max_value is not None and coerced > max_value:
+        coerced = max_value
+    return coerced
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value_str = str(value).strip().lower()
+    if value_str in {"1", "true", "yes", "on", "y"}:
+        return True
+    if value_str in {"0", "false", "no", "off", "n"}:
+        return False
+    return default
+
+
+def _load_dispatch_controls(
+    path: Path,
+    *,
+    fallback_max_calls: int,
+    fallback_concurrency: int,
+) -> dict[str, Any]:
+    default_controls = {
+        "max_calls": _coerce_int(fallback_max_calls, 0, min_value=0, max_value=MAX_CALLS_CLAMP),
+        "concurrency": _coerce_int(fallback_concurrency, 20, min_value=1, max_value=MAX_CONCURRENCY_CLAMP),
+        "stop_requested": False,
+        "source": "live-campaign-runner",
+    }
+    if not path.exists():
+        return default_controls
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return default_controls
+    if not isinstance(raw, dict):
+        return default_controls
+    max_calls = _coerce_int(raw.get("max_calls"), fallback_max_calls, min_value=0, max_value=MAX_CALLS_CLAMP)
+    concurrency = _coerce_int(raw.get("concurrency"), fallback_concurrency, min_value=1, max_value=MAX_CONCURRENCY_CLAMP)
+    stop_requested = _coerce_bool(raw.get("stop_requested"), _coerce_bool(raw.get("stop"), False))
+    return {
+        **default_controls,
+        "max_calls": max_calls,
+        "concurrency": concurrency,
+        "stop_requested": stop_requested,
+    }
+
+
+def _persist_dispatch_controls(
+    path: Path,
+    controls: dict[str, Any],
+) -> None:
+    payload = {
+        "max_calls": int(controls.get("max_calls", 0)),
+        "concurrency": int(controls.get("concurrency", 20)),
+        "stop_requested": bool(controls.get("stop_requested", False)),
+        "source": str(controls.get("source", "live-campaign-runner")),
+        "updated_utc": int(time.time()),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def _send_call(
     *,
     api_key: str,
@@ -180,6 +253,11 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--allow-after-hours-calls", dest="allow_after_hours_calls", action="store_true", default=True)
     ap.add_argument("--no-after-hours-calls", dest="allow_after_hours_calls", action="store_false", help="Disable outside-hours calling.")
     ap.add_argument(
+        "--controls-file",
+        default=os.getenv("LIVE_DISPATCH_CONTROL_FILE", "data/leads/.live_dispatch_controls.json"),
+        help="JSON control file for max_calls / concurrency / stop flag.",
+    )
+    ap.add_argument(
         "--stop-reasons",
         default="dnc,closed,invalid,contacted,booked",
         help="Comma-separated terminal outcomes.",
@@ -195,6 +273,28 @@ def main() -> int:
     if not args.dry_run and (not api_key or not from_number or not agent_id):
         print("Missing RETELL_API_KEY, RETELL_FROM_NUMBER, or B2B_AGENT_ID")
         return 2
+
+    control_path = Path(args.controls_file)
+    controls = _load_dispatch_controls(
+        control_path,
+        fallback_max_calls=args.max_calls,
+        fallback_concurrency=args.concurrency,
+    )
+    if controls.get("stop_requested"):
+        print(json.dumps(
+            {
+                "status": "stopped",
+                "reason": "dashboard_stop_flag",
+                "max_calls": controls.get("max_calls", args.max_calls),
+                "concurrency": controls.get("concurrency", args.concurrency),
+                "campaign_id": args.campaign_id,
+            },
+            sort_keys=True,
+            indent=2,
+        ))
+        return 0
+    args.max_calls = _coerce_int(controls.get("max_calls"), args.max_calls, min_value=0, max_value=MAX_CALLS_CLAMP)
+    args.concurrency = _coerce_int(controls.get("concurrency"), args.concurrency, min_value=1, max_value=MAX_CONCURRENCY_CLAMP)
 
     queue = _iter_jsonl(Path(args.queue_file))
     if not queue:
@@ -309,7 +409,22 @@ def main() -> int:
                         "campaign_name": str(rec.get("campaign_name") or "").strip(),
                         "clinic_id": str(rec.get("clinic_id") or "").strip(),
                         "lead_id": lead_id,
-                        "clinic_name": str(rec.get("clinic_name") or "").strip(),
+                        "clinic_name": str(
+                            rec.get("clinic_name")
+                            or rec.get("business_name")
+                            or rec.get("name")
+                            or rec.get("practice_name")
+                            or rec.get("practice")
+                            or ""
+                        ).strip(),
+                        "business_name": str(
+                            rec.get("business_name")
+                            or rec.get("clinic_name")
+                            or rec.get("name")
+                            or rec.get("practice_name")
+                            or rec.get("practice")
+                            or ""
+                        ).strip(),
                         "clinic_phone": to_number,
                         "call_window": call_window,
                         "call_window_type": "after_hours" if after_hours else "business_hours",
@@ -419,6 +534,8 @@ def main() -> int:
                 "selected": len(selected),
                 "daily_count": int(campaign_state.get("daily_count", 0)),
                 "dry_run": bool(args.dry_run),
+                "max_calls": int(args.max_calls),
+                "concurrency": int(args.concurrency),
                 "state_file": str(args.state_file),
                 "log_file": str(log_path),
             },
@@ -426,6 +543,8 @@ def main() -> int:
             indent=2,
         )
     )
+    controls.update({"stop_requested": False})
+    _persist_dispatch_controls(control_path, controls)
     return 0
 
 

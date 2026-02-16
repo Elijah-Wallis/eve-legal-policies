@@ -486,6 +486,9 @@ def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None =
         clinic_name = str(
             metadata.get("business_name")
             or metadata.get("clinic_name")
+            or metadata.get("name")
+            or metadata.get("practice")
+            or metadata.get("practice_name")
             or rec.get("clinic_name")
             or rec.get("clinic")
             or lead_info.get("clinic_name")
@@ -658,6 +661,9 @@ def load_call_detail(
         return str(
             metadata.get("business_name")
             or metadata.get("clinic_name")
+            or metadata.get("name")
+            or metadata.get("practice")
+            or metadata.get("practice_name")
             or rec.get("clinic_name")
             or rec.get("clinic")
             or metadata.get("clinic")

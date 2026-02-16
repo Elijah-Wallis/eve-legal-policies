@@ -285,6 +285,33 @@
       gap: 8px;
       flex-wrap: wrap;
     }
+    .status-chip {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(130, 160, 255, 0.14);
+      border: 1px solid rgba(130, 160, 255, 0.45);
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+    }
+    .status-chip.warn {
+      background: rgba(255, 193, 77, 0.15);
+      border-color: rgba(255, 193, 77, 0.55);
+      color: #ffd18d;
+    }
+    .status-chip.bad {
+      background: rgba(255, 110, 110, 0.16);
+      border-color: rgba(255, 110, 110, 0.45);
+      color: #ff9a9a;
+    }
+    .status-chip.ok {
+      background: rgba(88, 204, 150, 0.16);
+      border-color: rgba(88, 204, 150, 0.45);
+      color: #9ef0c3;
+    }
     .btn {
       border: 0;
       border-radius: 9px;
@@ -295,6 +322,43 @@
       cursor: pointer;
     }
     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .control-card {
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .control-card h4 {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
+    .control-row {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .control-row label {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .slider {
+      width: 100%;
+      accent-color: #5fa8ff;
+    }
+    .control-value {
+      color: var(--accent);
+      font-weight: 700;
+      font-family: var(--mono);
+      font-size: 0.96rem;
+    }
     @media (max-width: 780px) {
       .two-col { grid-template-columns: 1fr; }
     }
@@ -308,13 +372,56 @@
         <p class="hint" id="campaign">Loading campaign...</p>
       </div>
       <div class="action-row">
-        <button class="btn" id="startBtn">Open Campaign Start Command</button>
+        <button class="btn" id="startBtn">Start Dialing</button>
+        <button class="btn" id="stopBtn">Stop Launcher</button>
+        <span id="launchState" class="status-chip">Launcher: unknown</span>
+        <span id="startStatus" class="hint">Ready</span>
         <span id="ping" class="pulse"></span><span id="stateText" class="hint">Connecting...</span>
       </div>
     </div>
 
     <section class="card">
       <div class="timeline" id="timeline"></div>
+    </section>
+
+    <section class="card">
+      <h3>Live Outbound Controls</h3>
+      <p class="hint" id="controlState">Loading controls…</p>
+      <div class="control-grid">
+        <div class="control-card">
+          <h4>Next Session Size</h4>
+          <div class="control-row">
+            <label for="maxCallsRange">Max calls</label>
+            <input id="maxCallsRange" class="slider" type="range" min="1" max="50" step="1" />
+            <div class="control-row">
+              <span class="control-value" id="maxCallsValue">5</span>
+            </div>
+          </div>
+          <button class="btn" id="applyMaxCallsBtn">Apply max calls</button>
+        </div>
+        <div class="control-card">
+          <h4>Concurrency</h4>
+          <div class="control-row">
+            <label for="concurrencyRange">Concurrent calls</label>
+            <input id="concurrencyRange" class="slider" type="range" min="1" max="20" step="1" />
+            <div class="control-row">
+              <span class="control-value" id="concurrencyValue">5</span>
+            </div>
+          </div>
+          <button class="btn" id="applyConcurrencyBtn">Apply concurrency</button>
+        </div>
+        <div class="control-card">
+          <h4>Emergency Stop</h4>
+          <div class="control-row">
+            <span class="hint">Stops next outbound run before dispatching calls.</span>
+          </div>
+          <div class="action-row">
+            <button class="btn" id="pauseBtn">Pause next run</button>
+            <button class="btn" id="resumeBtn">Resume next run</button>
+          </div>
+          <p id="pauseState" class="hint" style="margin-top:8px;">Stop state: unknown</p>
+        </div>
+      </div>
     </section>
 
     <section class="grid">
@@ -442,6 +549,11 @@
 
     const state = {
       detailOpen: false,
+      controls: {
+        max_calls: 5,
+        concurrency: 5,
+        stop_requested: false,
+      },
     };
 
     function fmtInt(v) { return String(Number(v || 0)); }
@@ -455,6 +567,96 @@
       const modal = document.getElementById("callDetailModal");
       modal.classList.remove("open");
       state.detailOpen = false;
+    }
+
+    async function fetchOutboundControls() {
+      try {
+        const res = await fetch("/api/dashboard/outbound-controls", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error("Could not load outbound controls.");
+        }
+        const payload = await res.json();
+        const controls = payload?.controls || {};
+        state.controls = {
+          max_calls: Number(controls.max_calls || 0),
+          concurrency: Number(controls.concurrency || 0),
+          stop_requested: controls.stop_requested || false,
+        };
+        document.getElementById("maxCallsRange").value = String(Math.max(1, Number(state.controls.max_calls || 0) || 1));
+        document.getElementById("concurrencyRange").value = String(Math.max(1, Number(state.controls.concurrency || 0) || 1));
+        document.getElementById("maxCallsValue").textContent = String(Math.max(1, Number(state.controls.max_calls || 0) || 1));
+        document.getElementById("concurrencyValue").textContent = String(Math.max(1, Number(state.controls.concurrency || 0) || 1));
+        document.getElementById("pauseState").textContent = `Stop state: ${state.controls.stop_requested ? "Paused" : "Active"}`;
+        document.getElementById("controlState").textContent =
+          `Queued for next run • max_calls=${state.controls.max_calls || 0}, concurrency=${state.controls.concurrency || 1}, paused=${state.controls.stop_requested ? "yes" : "no"}`;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function fetchLaunchState() {
+      try {
+        const res = await fetch("/api/dashboard/outbound-launch-state", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error("Could not load launch state.");
+        }
+        const payload = await res.json();
+        const launch = payload?.state || {};
+        const launchState = document.getElementById("launchState");
+        const isRunning = !!launch.running;
+        const pid = Number(launch.pid || 0);
+        launchState.classList.remove("ok", "warn", "bad");
+
+        if (isRunning) {
+          launchState.textContent = `Launcher: Running (PID ${pid || "—"})`;
+          launchState.classList.add("ok");
+          startBtn.disabled = false;
+          stopBtn.disabled = false;
+          startStatus.textContent = "Launcher running";
+        } else {
+          launchState.textContent = `Launcher: ${launch.status === "not_running" ? "Not running" : "Stopped"} (PID ${pid || "—"})`;
+          launchState.classList.add("warn");
+          stopBtn.disabled = true;
+          if (launch.status === "not_running") {
+            startStatus.textContent = "Launcher not running";
+          }
+        }
+      } catch (err) {
+        const launchState = document.getElementById("launchState");
+        launchState.classList.remove("ok", "warn");
+        launchState.classList.add("bad");
+        launchState.textContent = "Launcher: state unavailable";
+        console.error(err);
+      }
+    }
+
+    async function updateOutboundControls(patch) {
+      const body = {
+        ...(state.controls || {}),
+        ...patch,
+      };
+      try {
+        const res = await fetch("/api/dashboard/outbound-controls", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          throw new Error("Could not save outbound controls.");
+        }
+        const payload = await res.json();
+        const controls = payload?.controls || {};
+        state.controls = {
+          max_calls: Number(controls.max_calls || 0),
+          concurrency: Number(controls.concurrency || 0),
+          stop_requested: controls.stop_requested || false,
+        };
+        fetchOutboundControls();
+      } catch (err) {
+        console.error(err);
+      }
     }
 
     function msToSeconds(ms) {
@@ -483,7 +685,7 @@
       const recording = document.getElementById("callRecordingLink");
       const transcript = document.getElementById("callTranscript");
 
-      const business = call.clinic_name || call.call_id || "Unknown business";
+      const business = call.clinic_name || "Unknown business";
       const callId = call.call_id || "—";
       const to = call.to_number || "—";
       const from = call.from_number || "—";
@@ -639,17 +841,20 @@
         } else {
           latestCalls.innerHTML = calls.map((row) => {
             const callId = row.call_id || "-";
-            const name = row.clinic_name || "Unknown business";
+            const nameFallback = row.to_number || row.phone || row.from_number || "";
+            const resolvedName = row.clinic_name && row.clinic_name !== "Unknown business" ? row.clinic_name : (nameFallback || "Unknown business");
             const num = row.to_number || "-";
             const st = row.status || "-";
             const transcript = row.transcript_snippet || "";
+            const transcriptLink = callId !== "-"
+              ? `<a href="#" class="transcript-link" data-call-id="${escapeHtml(callId)}">Transcript</a>`
+              : "<span class=\"hint\">Transcript</span>";
             return `<tr>
               <td>
-                <a href=\"#\" class=\"business-link\" data-call-id=\"${escapeHtml(callId)}\">${escapeHtml(name)}</a>
-                ${callId !== "-" ? `<span class=\"call-id-badge\">Call ID: ${escapeHtml(callId)}</span>` : ""}
+                <a href=\"#\" class=\"business-link\" data-call-id=\"${escapeHtml(callId)}\">${escapeHtml(resolvedName)}</a>
               </td>
               <td>${num}</td>
-              <td class=\"transcript-cell\" title=\"${escapeHtml(transcript)}\">${escapeHtml(transcript) || "-"}</td>
+              <td class=\"transcript-cell\" title=\"${escapeHtml(transcript)}\">${transcriptLink}</td>
               <td>${st}</td>
             </tr>`;
           }).join("");
@@ -676,23 +881,147 @@
       }
     }
 
-    const btn = document.getElementById("startBtn");
-    btn.addEventListener("click", async () => {
-      const text = "make start";
-      try {
-        await navigator.clipboard.writeText(text);
-        const old = btn.textContent;
-        btn.textContent = "Copied: make start";
-        setTimeout(() => (btn.textContent = old), 1600);
-      } catch (_) {
-        btn.textContent = "Run: make start";
+    const startBtn = document.getElementById("startBtn");
+    const startStatus = document.getElementById("startStatus");
+    let startInFlight = false;
+    const stopBtn = document.getElementById("stopBtn");
+    let stopInFlight = false;
+    stopBtn.disabled = true;
+    startBtn.addEventListener("click", async () => {
+      if (startInFlight) {
+        return;
       }
+      startInFlight = true;
+      startBtn.disabled = true;
+      const oldLabel = startBtn.textContent;
+      startBtn.textContent = "Starting...";
+      startStatus.textContent = "Starting outbound dialing in browser...";
+      try {
+        const res = await fetch("/api/dashboard/start-outbound", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.error || "Could not start dialing.");
+        }
+        const payload = await res.json();
+        const started = payload?.start || {};
+        if (started.status === "already_running") {
+          startStatus.textContent = `Already running (PID ${started.pid || "—"})`;
+        } else {
+          startStatus.textContent = `Started (PID ${started.pid || "—"})`;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not start dialing.";
+        startStatus.textContent = msg;
+      } finally {
+        startBtn.disabled = false;
+        await fetchLaunchState();
+        startBtn.textContent = oldLabel;
+        startInFlight = false;
+        setTimeout(() => {
+          if (!startInFlight && startBtn.textContent === oldLabel && startStatus.textContent.startsWith("Started (PID")) {
+            startStatus.textContent = "Running";
+          }
+        }, 5000);
+      }
+    });
+    stopBtn.addEventListener("click", async () => {
+      if (stopInFlight) {
+        return;
+      }
+      stopInFlight = true;
+      stopBtn.disabled = true;
+      const oldLabel = stopBtn.textContent;
+      stopBtn.textContent = "Stopping...";
+      try {
+        const res = await fetch("/api/dashboard/stop-outbound", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body?.error || "Could not stop dialing.");
+        }
+        const payload = await res.json();
+        const stopped = payload?.stop || {};
+        if (stopped.status === "stopped") {
+          startStatus.textContent = `Stopped (PID ${stopped.pid || "—"})`;
+        } else if (stopped.status === "not_running") {
+          startStatus.textContent = `No active launcher found (PID ${stopped.pid || "—"})`;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not stop dialing.";
+        startStatus.textContent = msg;
+      } finally {
+        stopBtn.disabled = false;
+        await fetchLaunchState();
+        stopBtn.textContent = oldLabel;
+        stopInFlight = false;
+        setTimeout(() => {
+          if (!stopInFlight && startStatus.textContent.startsWith("Stopped (PID")) {
+            startStatus.textContent = "Stopped";
+          }
+        }, 5000);
+      }
+    });
+
+    const maxCallsRange = document.getElementById("maxCallsRange");
+    const maxCallsValue = document.getElementById("maxCallsValue");
+    const concurrencyRange = document.getElementById("concurrencyRange");
+    const concurrencyValue = document.getElementById("concurrencyValue");
+    const applyMaxCallsBtn = document.getElementById("applyMaxCallsBtn");
+    const applyConcurrencyBtn = document.getElementById("applyConcurrencyBtn");
+    const pauseBtn = document.getElementById("pauseBtn");
+    const resumeBtn = document.getElementById("resumeBtn");
+
+    maxCallsRange.addEventListener("input", () => {
+      maxCallsValue.textContent = maxCallsRange.value;
+    });
+    concurrencyRange.addEventListener("input", () => {
+      concurrencyValue.textContent = concurrencyRange.value;
+    });
+
+    applyMaxCallsBtn.addEventListener("click", async () => {
+      await updateOutboundControls({
+        max_calls: Number(maxCallsRange.value),
+        stop_requested: false,
+      });
+    });
+    applyConcurrencyBtn.addEventListener("click", async () => {
+      await updateOutboundControls({
+        concurrency: Number(concurrencyRange.value),
+        stop_requested: false,
+      });
+    });
+    pauseBtn.addEventListener("click", async () => {
+      await updateOutboundControls({ stop_requested: true });
+    });
+    resumeBtn.addEventListener("click", async () => {
+      await updateOutboundControls({ stop_requested: false });
     });
 
     const latestCallsTable = document.getElementById("latestCalls");
     latestCallsTable.addEventListener("click", (event) => {
       const anchor = event.target.closest(".business-link");
-      if (!anchor) {
+      const transcriptAnchor = event.target.closest(".transcript-link");
+      if (!anchor && !transcriptAnchor) {
+        return;
+      }
+      if (transcriptAnchor) {
+        event.preventDefault();
+        const callId = transcriptAnchor.dataset.callId;
+        if (!callId || callId === "-") {
+          return;
+        }
+        openCallDetail(callId);
         return;
       }
       event.preventDefault();
@@ -718,7 +1047,11 @@
     });
 
     fetchStatus();
+    fetchOutboundControls();
     setInterval(fetchStatus, 3000);
+    setInterval(fetchOutboundControls, 5000);
+    setInterval(fetchLaunchState, 3000);
+    fetchLaunchState();
   </script>
 </body>
 </html>

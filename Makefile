@@ -128,9 +128,10 @@ LIVE_CAMPAIGN_ID ?= ont-live-001
 LIVE_CAMPAIGN_NAME ?= b2b_outbound_workflow
 LIVE_QUEUE_FILE ?= $(LIVE_OUTPUT_DIR)/live_call_queue.jsonl
 LIVE_LEAD_FILE ?= $(LIVE_OUTPUT_DIR)/live_leads.csv
-LIVE_MAX_CALLS ?= 0
-LIVE_CONCURRENCY ?= 20
+LIVE_MAX_CALLS ?= 5
+LIVE_CONCURRENCY ?= 5
 LIVE_TENANT ?= live_medspa
+LIVE_DISPATCH_CONTROL_FILE ?= data/leads/.live_dispatch_controls.json
 
 synth-generate:
 	@python3 synthetic_data_for_training/generate_medspa_synthetic_data.py \
@@ -183,6 +184,7 @@ live-call-batch:
 		--tenant "$(LIVE_TENANT)" \
 		--max-calls "$(LIVE_MAX_CALLS)" \
 		--concurrency "$(LIVE_CONCURRENCY)" \
+		--controls-file "$(LIVE_DISPATCH_CONTROL_FILE)" \
 		--resume \
 		--limit-call-rate
 
@@ -205,7 +207,7 @@ live-export-supabase:
 
 omni-gate-start:
 	@$(MAKE) live-build-queue
-	@$(MAKE) live-call-batch LIVE_MAX_CALLS=0 LIVE_CONCURRENCY=20
+	@$(MAKE) live-call-batch
 
 omni-gate-eod:
 	@$(MAKE) live-map-journeys
