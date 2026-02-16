@@ -1,4 +1,4 @@
-.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase live-build-queue live-call-batch live-map-journeys live-export-supabase
+.PHONY: help call call-status retell-fast ws-on ws-restore ws-dev cloudflare-verify learn leads ops-loop money test ci ci-local metrics dashboard go self-improve skill-capture skill-validate synth-generate synth-push-leads synth-call-batch synth-map-journeys synth-export-supabase live-build-queue live-call-batch live-map-journeys live-export-supabase omni-gate-start omni-gate-eod
 
 LEARN_APPLY_FLAG := $(if $(filter true 1,$(RETELL_LEARN_APPLY)),--apply,--no-apply)
 
@@ -31,6 +31,8 @@ help:
 	@echo "  make live-call-batch       # run live outbound calls from live queue"
 	@echo "  make live-map-journeys     # normalize Retell calls into live journey rows"
 	@echo "  make live-export-supabase  # export live journey rows into Supabase"
+	@echo "  make omni-gate-start       # daily start sequence for outbound system"
+	@echo "  make omni-gate-eod         # end-of-day metrics and outcome summary"
 	@echo "  make self-improve          # run safe self-improvement cycle (propose)"
 	@echo "  make skill-capture ID=... INTENT=... [TESTS=...]"
 	@echo "  make skill-validate PATH=skills/<file>.md"
@@ -197,3 +199,13 @@ live-export-supabase:
 		--supabase-url "$${SUPABASE_URL}" \
 		--supabase-key "$${SUPABASE_SERVICE_KEY}" \
 		--schema "$${SUPABASE_SCHEMA:-public}"
+
+omni-gate-start:
+	@$(MAKE) live-build-queue
+	@$(MAKE) live-call-batch LIVE_MAX_CALLS=0 LIVE_CONCURRENCY=20
+
+omni-gate-eod:
+	@$(MAKE) live-map-journeys
+	@python3 scripts/revenue_ops_loop.py \
+		--calls-dir data/retell_calls \
+		--push-webhook "$${N8N_OUTCOME_WEBHOOK_URL:-}"

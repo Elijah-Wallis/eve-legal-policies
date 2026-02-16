@@ -48,6 +48,23 @@ make live-map-journeys
 make live-export-supabase
 ```
 
+## Deployment-ready daily automation
+
+Morning start (Mon–Sat, local time):
+
+```bash
+make live-build-queue CAMPAIGN_STATES=Texas,Florida,California
+make live-call-batch LIVE_MAX_CALLS=0 LIVE_CONCURRENCY=20
+```
+
+End-of-day update (Mon–Sat):
+
+```bash
+make live-map-journeys LIVE_CAMPAIGN_ID=ont-live-001
+python3 scripts/revenue_ops_loop.py --calls-dir data/retell_calls --push-webhook "$N8N_OUTCOME_WEBHOOK_URL"
+python3 scripts/export_journey_to_supabase.py --calls-dir data/retell_calls --journey-path data/retell_calls/live_customer_journeys.jsonl --supabase-url "$SUPABASE_URL" --supabase-key "$SUPABASE_SERVICE_KEY" --schema "$SUPABASE_SCHEMA"
+```
+
 Common direct calls:
 
 ```bash
@@ -121,3 +138,8 @@ Use `.env.retell.example` as the source of truth and copy values into `.env.rete
 
 - Keep `attempts_exceeded_200=true` as a first-class journey attribute and route high-attempt leads into a separate nurture sequence.
 - Keep existing call scripts and n8n integrations additive, but keep workflow control simple: `B2B outbound calling workflow` is the only active outbound workflow.
+
+## After-hours call policy
+
+- Default call window is `09:00-18:00` from each lead row (`call_hours`).
+- Outside of that window, a lead is called only once for first-after-hours voicemail attempts (`after_hours_call_once_done=true`), then skipped until lead status changes from terminal.

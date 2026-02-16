@@ -47,6 +47,34 @@ def _iter_jsonl(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _parse_call_window(window: Any) -> tuple[int, int] | None:
+    raw = str(window or "").strip()
+    if not raw:
+        return None
+    if "-" not in raw:
+        return None
+    start_raw, end_raw = raw.split("-", 1)
+    try:
+        start_h, start_m = [int(x.strip()) for x in start_raw.split(":")]
+        end_h, end_m = [int(x.strip()) for x in end_raw.split(":")]
+        if not (0 <= start_h < 24 and 0 <= start_m < 60 and 0 <= end_h < 24 and 0 <= end_m < 60):
+            return None
+        return start_h * 60 + start_m, end_h * 60 + end_m
+    except Exception:
+        return None
+
+
+def _is_within_call_window(local_now: datetime, window: Any) -> bool:
+    parsed = _parse_call_window(window)
+    if parsed is None:
+        return True
+    start_min, end_min = parsed
+    current_minute = local_now.hour * 60 + local_now.minute
+    if start_min <= end_min:
+        return start_min <= current_minute <= end_min
+    return current_minute >= start_min or current_minute <= end_min
+
+
 def _load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {
@@ -149,6 +177,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--limit-call-rate", nargs="?", default=0.0, type=float, const=1.0)
     ap.add_argument("--dry-run", action="store_true", default=False)
     ap.add_argument("--resume", action="store_true", default=False)
+    ap.add_argument("--allow-after-hours-calls", dest="allow_after_hours_calls", action="store_true", default=True)
+    ap.add_argument("--no-after-hours-calls", dest="allow_after_hours_calls", action="store_false", help="Disable outside-hours calling.")
     ap.add_argument(
         "--stop-reasons",
         default="dnc,closed,invalid,contacted,booked",
@@ -190,6 +220,7 @@ def main() -> int:
     log_path = out_dir / "live_campaign_dispatch_log.jsonl"
 
     selected: list[dict[str, Any]] = []
+    local_now = datetime.now().astimezone()
     for rec in queue:
         lead_id = str(rec.get("lead_id") or "").strip()
         if not lead_id:
@@ -218,6 +249,12 @@ def main() -> int:
         warning_threshold = int(args.attempt_warning_threshold)
         state_entry["attempt_warning_threshold"] = warning_threshold
         state_entry["attempts_exceeded_200"] = attempts > warning_threshold and warning_threshold > 0
+        in_business_hours = _is_within_call_window(local_now, rec.get("call_hours"))
+        after_hours = not in_business_hours
+        if not args.allow_after_hours_calls and after_hours:
+            continue
+        if after_hours and state_entry.get("after_hours_call_once_done", False):
+            continue
         if attempts >= int(args.max_attempts):
             continue
         if int(daily_count) >= int(args.daily_call_cap):
@@ -255,6 +292,9 @@ def main() -> int:
                 to_number = _normalize_phone(rec.get("to_number") or rec.get("clinic_phone") or rec.get("phone"))
                 attempt_number = int(call_state.get("attempts", 0)) + 1
                 warning_threshold = int(args.attempt_warning_threshold or 0)
+                call_window = str(rec.get("call_hours") or "09:00-18:00").strip() or "09:00-18:00"
+                in_business_hours = _is_within_call_window(datetime.now().astimezone(), call_window)
+                after_hours = not in_business_hours
                 call_state["lead_id"] = lead_id
                 call_state["campaign_id"] = str(rec.get("campaign_id") or args.campaign_id).strip()
                 future = pool.submit(
@@ -271,6 +311,8 @@ def main() -> int:
                         "lead_id": lead_id,
                         "clinic_name": str(rec.get("clinic_name") or "").strip(),
                         "clinic_phone": to_number,
+                        "call_window": call_window,
+                        "call_window_type": "after_hours" if after_hours else "business_hours",
                         "call_segment": str(rec.get("lead_segment") or "").strip(),
                         "segment_score": str(rec.get("segment_score") or 0),
                         "attempt_number": attempt_number,
@@ -279,14 +321,14 @@ def main() -> int:
                     },
                     dry_run=bool(args.dry_run),
                 )
-                futures[future] = (lead_id, rec, to_number)
+                futures[future] = (lead_id, rec, to_number, after_hours, call_window)
                 to_process += 1
             if args.max_calls and to_process >= int(args.max_calls):
                 break
 
         with log_path.open("a", encoding="utf-8") as log:
             for future in as_completed(futures):
-                lead_id, rec, to_number = futures[future]
+                lead_id, rec, to_number, after_hours, call_window = futures[future]
                 ok, result, err = future.result()
                 attempts += 1
                 call_id = str(result.get("call_id") or "").strip() if isinstance(result, dict) else ""
@@ -318,6 +360,9 @@ def main() -> int:
                         ),
                         "lead_status": status,
                         "status": status,
+                        "call_window": call_window,
+                        "call_window_type": "after_hours" if after_hours else "business_hours",
+                        "after_hours_call_once_done": bool(after_hours),
                         "last_status": status,
                         "reason": reason,
                         "timestamp_utc": int(time.time()),
@@ -341,6 +386,8 @@ def main() -> int:
                             "campaign_id": str(rec.get("campaign_id") or args.campaign_id),
                             "call_id": call_id,
                             "to_number": to_number,
+                            "call_window": call_window,
+                            "call_window_type": "after_hours" if after_hours else "business_hours",
                             "status": status,
                             "reason": reason,
                             "attempt": int(record_state.get("attempts", 0)),

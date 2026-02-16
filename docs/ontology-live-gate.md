@@ -102,6 +102,9 @@ Campaign controls:
 - attempts warning threshold (default `200`): `CAMPAIGN_ATTEMPT_WARNING_THRESHOLD`
 - flagging: `attempts_exceeded_200=true` for records over warning threshold
 - terminal stop states: `dnc,closed,invalid,contacted,booked`
+- after-hours policy: one voicemail attempt per lead outside configured `call_hours`
+- default lead window: `09:00-18:00`
+- control outside-hours by adding `--allow-after-hours-calls` (default on) or `--no-after-hours-calls` (off)
 
 ## 3) Journey normalization
 
@@ -136,6 +139,9 @@ Output row contract:
   "attempt_number": 3,
   "attempt_warning_threshold": 200,
   "attempts_exceeded_200": false,
+  "call_window": "09:00-18:00",
+  "call_window_type": "business_hours",
+  "after_hours_call_once_done": false,
   "transcript_hash": "sha256hex",
   "outcome_ts": 1700000000000
 }
