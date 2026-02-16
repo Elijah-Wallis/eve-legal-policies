@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -269,4 +271,198 @@ def build_repo_map(repo_root: Path) -> dict[str, Any]:
         "components": components,
         "top_level": top_level,
         "sop_docs": sop_docs,
+    }
+
+
+def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(rec, dict):
+                rows.append(rec)
+    return rows
+
+
+def _read_live_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None = None, tenant: str | None = None) -> dict[str, Any]:
+    queue_file = repo_root / "data" / "leads" / "live_call_queue.jsonl"
+    state_file = repo_root / "data" / "leads" / ".live_campaign_state.json"
+    live_leads_file = repo_root / "data" / "leads" / "live_leads.csv"
+    queue_rows = _read_jsonl_records(queue_file)
+    state = _read_live_state(state_file)
+
+    campaigns = state.get("campaigns")
+    if not isinstance(campaigns, dict):
+        campaigns = {}
+
+    selected_campaign_id = campaign_id
+    if not selected_campaign_id:
+        selected_campaign_id = next(iter(campaigns.keys()), "ont-live-001")
+
+    campaign_state = campaigns.get(selected_campaign_id)
+    if not isinstance(campaign_state, dict):
+        campaign_state = {}
+
+    calls_state = state.get("calls")
+    if not isinstance(calls_state, dict):
+        calls_state = {}
+
+    # Intake summary
+    queue_size = len(queue_rows)
+    lead_status_counts: dict[str, int] = {}
+    for rec in queue_rows:
+        status = str(rec.get("lead_status") or rec.get("status") or "").strip().lower() or "new"
+        lead_status_counts[status] = lead_status_counts.get(status, 0) + 1
+
+    # Dispatch summary from state
+    dispatched = sum(1 for c in calls_state.values() if isinstance(c, dict))
+    in_progress = sum(
+        1 for c in calls_state.values()
+        if isinstance(c, dict) and str(c.get("lead_status", "")).strip().lower() not in {"failed", "completed", "booked", "dnc", "closed", "invalid", "contacted"}
+    )
+    terminal = sum(
+        1 for c in calls_state.values()
+        if isinstance(c, dict) and str(c.get("lead_status", "")).strip().lower() in {"dnc", "closed", "invalid", "contacted", "booked", "completed", "failed"}
+    )
+
+    calls_dir = repo_root / "data" / "retell_calls"
+    call_rows: list[dict[str, Any]] = []
+    for p in sorted(calls_dir.glob("*/call.json")):
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(rec, dict):
+                call_rows.append(rec)
+        except Exception:
+            continue
+
+    call_status_counts: dict[str, int] = {}
+    latest_calls: list[dict[str, Any]] = []
+    for rec in call_rows:
+        raw_status = str(rec.get("call_status") or rec.get("status") or rec.get("state") or "unknown")
+        status = raw_status.strip().lower() or "unknown"
+        call_status_counts[status] = call_status_counts.get(status, 0) + 1
+        latest_calls.append(
+            {
+                "call_id": str(rec.get("call_id") or "").strip(),
+                "clinic_name": str(rec.get("clinic_name") or rec.get("metadata", {}).get("clinic_name") or "").strip(),
+                "clinic_id": str(rec.get("clinic_id") or rec.get("metadata", {}).get("clinic_id") or "").strip(),
+                "to_number": str(rec.get("to_number") or rec.get("metadata", {}).get("to_number") or "").strip(),
+                "status": status,
+            }
+        )
+
+    journey_path = repo_root / "data" / "retell_calls" / "live_customer_journeys.jsonl"
+    journeys = _read_jsonl_records(journey_path)
+    journey_counts: dict[str, int] = {}
+    nurture_flags = {
+        "recording_followup": 0,
+        "send_evidence": 0,
+        "set_follow_up_plan": 0,
+        "log_call_outcome": 0,
+    }
+    for row in journeys:
+        stage = str(row.get("conversion_stage") or "unknown").strip().lower()
+        if not stage:
+            stage = "unknown"
+        journey_counts[stage] = journey_counts.get(stage, 0) + 1
+        tools = row.get("tool_calls")
+        if isinstance(tools, list):
+            for name in tools:
+                key = _normalize_tool_name(name)
+                if key in nurture_flags:
+                    nurture_flags[key] += 1
+
+        for key in ("recording_followup_requested",):
+            if str(row.get(key)).strip().lower() in {"1", "true", "yes"}:
+                nurture_flags["recording_followup"] = nurture_flags["recording_followup"] + 1
+
+    # Lead file sanity + segmentation visibility
+    segments: dict[str, int] = {}
+    if live_leads_file.exists():
+        try:
+            import csv
+
+            with live_leads_file.open("r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    segment = str(row.get("lead_segment") or row.get("segment") or "unsegmented").strip().lower()
+                    segments[segment] = segments.get(segment, 0) + 1
+        except Exception:
+            pass
+
+    # Step lighting
+    step_status = {
+        "intake": "ok" if queue_size > 0 else "idle",
+        "dispatch": "ok" if campaign_state.get("daily_count", 0) > 0 or dispatched > 0 else ("running" if queue_size > 0 else "idle"),
+        "mapping": "ok" if journey_path.exists() else ("running" if call_rows else "idle"),
+        "persistence": "ok" if bool(journeys) else ("running" if journey_counts else "idle"),
+        "nurture": "ok" if any(v > 0 for v in nurture_flags.values()) else ("running" if call_rows else "idle"),
+    }
+
+    return {
+        "campaign_id": selected_campaign_id,
+        "tenant": tenant or "live_medspa",
+        "files": {
+            "queue_file": str(queue_file),
+            "state_file": str(state_file),
+            "journey_file": str(journey_path),
+            "live_leads_file": str(live_leads_file),
+        },
+        "intake": {
+            "queue_size": queue_size,
+            "lead_status_counts": lead_status_counts,
+            "segments": segments,
+        },
+        "dispatch": {
+            "attempted_calls": dispatched,
+            "in_progress": in_progress,
+            "terminal": terminal,
+            "daily_count": int(campaign_state.get("daily_count", 0) or 0),
+            "last_run_utc": int(state.get("last_run_utc", 0) or 0),
+            "call_window_caps": {
+                "daily_call_cap": int(campaign_state.get("daily_call_cap", os.getenv("CAMPAIGN_DAILY_CALL_CAP", "3")) or 3),
+                "max_attempts": int(campaign_state.get("max_attempts", os.getenv("CAMPAIGN_MAX_ATTEMPTS", "500")) or 500),
+                "attempt_warning_threshold": int(
+                    campaign_state.get("attempt_warning_threshold", os.getenv("CAMPAIGN_ATTEMPT_WARNING_THRESHOLD", "200")) or 200
+                ),
+            },
+        },
+        "dispatch_state": {
+            "calls_map_size": len(calls_state),
+            "status_counts": lead_status_counts,
+        },
+        "transcripts": {
+            "call_artifact_count": len(call_rows),
+            "call_status_counts": call_status_counts,
+            "latest_calls": latest_calls[-20:][::-1],
+        },
+        "journeys": {
+            "count": len(journeys),
+            "conversion_counts": journey_counts,
+            "nurture_tool_hits": nurture_flags,
+        },
+        "step_status": step_status,
+        "pipeline_health": {
+            "stage": "active" if any(v == "running" for v in step_status.values()) else "idle",
+        },
     }

@@ -14,6 +14,7 @@ Other simple commands:
 
 ```bash
 make call TO=+19859914360
+make start
 make call-status ID=call_xxx
 make retell-fast
 make learn
@@ -130,6 +131,9 @@ python3 -m uvicorn app.server:app --host 0.0.0.0 --port 8080
 Dashboard:
 
 - One command: `make dashboard` (starts server + opens dashboard)
+- One command shortcut: `make start` (build queue and start outbound calls)
+- Full launcher: `/Users/elijah/Documents/New project/start_outbound_dialing`  
+  (checks `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `B2B_AGENT_ID`, starts live outbound dialing, then opens the dashboard)
 - Open directly: `http://127.0.0.1:8080/dashboard/`
 - APIs: `/api/dashboard/summary`, `/api/dashboard/repo-map`, `/api/dashboard/sop`, `/api/dashboard/readme`
 
