@@ -639,14 +639,14 @@
         } else {
           latestCalls.innerHTML = calls.map((row) => {
             const callId = row.call_id || "-";
-            const name = row.clinic_name || "-";
+            const name = row.clinic_name || "Unknown business";
             const num = row.to_number || "-";
             const st = row.status || "-";
             const transcript = row.transcript_snippet || "";
             return `<tr>
               <td>
                 <a href=\"#\" class=\"business-link\" data-call-id=\"${escapeHtml(callId)}\">${escapeHtml(name)}</a>
-                <span class=\"call-id-badge\">${escapeHtml(callId)}</span>
+                ${callId !== "-" ? `<span class=\"call-id-badge\">Call ID: ${escapeHtml(callId)}</span>` : ""}
               </td>
               <td>${num}</td>
               <td class=\"transcript-cell\" title=\"${escapeHtml(transcript)}\">${escapeHtml(transcript) || "-"}</td>
@@ -656,7 +656,7 @@
         }
 
         const errEl = document.getElementById("latestError");
-        if (status.intake?.queue_file) {
+        if (status.intake?.queue_file && status.intake?.queue_file_exists !== false) {
           errEl.style.display = "none";
           if (!document.title.includes("Live")) {
             document.title = "Eve Outbound Dialing - Live Dashboard";

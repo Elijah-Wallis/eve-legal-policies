@@ -334,6 +334,18 @@ def _extract_transcript_text(raw: Any) -> str:
     return ""
 
 
+def _extract_transcript_text_with_fallback(raw: Any, transcript_file: Path | None = None) -> str:
+    text = _extract_transcript_text(raw)
+    if text:
+        return text
+    if transcript_file is None or not transcript_file.exists():
+        return ""
+    try:
+        return transcript_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
 def _snippet(text: str, max_len: int = 180) -> str:
     text = str(text or "").strip()
     if not text:
@@ -347,20 +359,53 @@ def _build_lead_index(queue_rows: list[dict[str, Any]]) -> dict[str, dict[str, s
     index: dict[str, dict[str, str]] = {}
     for row in queue_rows:
         phone = _normalize_phone(row.get("phone") or row.get("to") or row.get("to_number") or "")
-        if not phone:
+        lead_id = str(row.get("lead_id") or row.get("id") or "").strip()
+        clinic_id = str(row.get("clinic_id") or row.get("practice_id") or "").strip()
+        clinic_name = str(
+            row.get("business_name")
+            or row.get("clinic_name")
+            or row.get("practice_name")
+            or row.get("name")
+            or row.get("practice")
+            or ""
+        ).strip()
+        if not clinic_name:
             continue
-        index[phone] = {
-            "clinic_name": str(
-                row.get("business_name")
-                or row.get("clinic_name")
-                or row.get("practice_name")
-                or row.get("name")
-                or ""
-            ).strip(),
-            "clinic_id": str(row.get("clinic_id") or row.get("lead_id") or "").strip(),
-            "lead_id": str(row.get("lead_id") or row.get("id") or "").strip(),
+        metadata = {
+            "clinic_name": clinic_name,
+            "clinic_id": clinic_id or lead_id,
+            "lead_id": lead_id,
         }
+        if phone:
+            index[f"phone:{phone}"] = metadata
+        if lead_id:
+            index[f"lead:{lead_id}"] = metadata
+        if clinic_id:
+            index[f"clinic:{clinic_id}"] = metadata
     return index
+
+
+def _resolve_business_info(
+    lead_index: dict[str, dict[str, str]],
+    *,
+    to_number: str,
+    clinic_id: str = "",
+    lead_id: str = "",
+) -> dict[str, str]:
+    normalized_phone = _normalize_phone(to_number)
+    if normalized_phone:
+        lead = lead_index.get(f"phone:{normalized_phone}")
+        if lead:
+            return lead
+    if lead_id:
+        lead = lead_index.get(f"lead:{lead_id}")
+        if lead:
+            return lead
+    if clinic_id:
+        lead = lead_index.get(f"clinic:{clinic_id}")
+        if lead:
+            return lead
+    return {}
 
 
 def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None = None, tenant: str | None = None) -> dict[str, Any]:
@@ -369,8 +414,10 @@ def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None =
     state_file = repo_root / "data" / "leads" / ".live_campaign_state.json"
     live_leads_file = repo_root / "data" / "leads" / "live_leads.csv"
     queue_rows = _read_jsonl_records(queue_file)
+    active_queue_file = queue_file
     if not queue_rows and backup_queue.exists():
         queue_rows = _read_jsonl_records(backup_queue)
+        active_queue_file = backup_queue
     state = _read_live_state(state_file)
     lead_index = _build_lead_index(queue_rows)
 
@@ -427,12 +474,20 @@ def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None =
         metadata = rec.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
-        to_number = str(rec.get("to_number") or metadata.get("to_number") or "").strip()
-        lead_info = lead_index.get(_normalize_phone(to_number), {})
+        to_number = str(rec.get("to_number") or rec.get("to") or metadata.get("to_number") or "").strip()
+        metadata_clinic_id = str(metadata.get("clinic_id") or rec.get("clinic_id") or "").strip()
+        metadata_lead_id = str(metadata.get("lead_id") or rec.get("lead_id") or "").strip()
+        lead_info = _resolve_business_info(
+            lead_index,
+            to_number=to_number,
+            clinic_id=metadata_clinic_id,
+            lead_id=metadata_lead_id,
+        )
         clinic_name = str(
-            metadata.get("clinic_name")
-            or metadata.get("business_name")
+            metadata.get("business_name")
+            or metadata.get("clinic_name")
             or rec.get("clinic_name")
+            or rec.get("clinic")
             or lead_info.get("clinic_name")
             or ""
         ).strip()
@@ -442,16 +497,17 @@ def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None =
             or lead_info.get("clinic_id")
             or ""
         ).strip()
-        transcript_text = _extract_transcript_text(
+        transcript_text = _extract_transcript_text_with_fallback(
             rec.get("transcript")
             if rec.get("transcript") is not None
-            else rec.get("transcript_with_tool_calls")
+            else rec.get("transcript_with_tool_calls"),
+            transcript_file=Path(str(rec.get("__call_path") or "")).parent / "transcript.txt",
         )
         call_status_counts[status] = call_status_counts.get(status, 0) + 1
         latest_calls.append(
             {
                 "call_id": str(rec.get("call_id") or "").strip(),
-                "clinic_name": clinic_name or str(rec.get("call_id") or "unknown call"),
+                "clinic_name": clinic_name or "Unknown business",
                 "clinic_id": clinic_id,
                 "to_number": to_number,
                 "lead_id": str(metadata.get("lead_id") or lead_info.get("lead_id") or rec.get("lead_id") or "").strip(),
@@ -513,12 +569,15 @@ def build_outbound_pipeline_status(repo_root: Path, *, campaign_id: str | None =
         "campaign_id": selected_campaign_id,
         "tenant": tenant or "live_medspa",
         "files": {
-            "queue_file": str(queue_file),
+            "queue_file": str(active_queue_file),
+            "active_queue_file": str(active_queue_file),
             "state_file": str(state_file),
             "journey_file": str(journey_path),
             "live_leads_file": str(live_leads_file),
         },
         "intake": {
+            "queue_file": str(active_queue_file),
+            "queue_file_exists": active_queue_file.exists(),
             "queue_size": queue_size,
             "lead_status_counts": lead_status_counts,
             "segments": segments,
@@ -602,20 +661,19 @@ def load_call_detail(
             or rec.get("clinic_name")
             or rec.get("clinic")
             or metadata.get("clinic")
-            or row_to
-            or rec.get("call_id")
-            or "unknown"
+            or "Unknown business"
         ).strip()
 
     def _build_row(rec: dict[str, Any], path: Path) -> dict[str, Any]:
         metadata = rec.get("metadata")
         if not isinstance(metadata, dict):
             metadata = {}
-        row_to = str(rec.get("to_number") or metadata.get("to_number") or "").strip()
-        transcript_text = _extract_transcript_text(
+        row_to = str(rec.get("to_number") or rec.get("to") or metadata.get("to_number") or "").strip()
+        transcript_text = _extract_transcript_text_with_fallback(
             rec.get("transcript")
             if rec.get("transcript") is not None
-            else rec.get("transcript_with_tool_calls")
+            else rec.get("transcript_with_tool_calls"),
+            transcript_file=path.parent / "transcript.txt",
         )
         return {
             "call_id": str(rec.get("call_id") or "").strip(),
@@ -654,7 +712,11 @@ def load_call_detail(
 
         payload = payload_raw
         call_candidate_id = str(payload.get("call_id") or "").strip()
-        payload_to = _normalize_phone(payload.get("to_number") or (payload.get("metadata", {}) or {}).get("to_number"))
+        payload_to = _normalize_phone(
+            payload.get("to_number")
+            or payload.get("to")
+            or (payload.get("metadata", {}) or {}).get("to_number")
+        )
 
         if target_call_id and call_candidate_id == target_call_id:
             return _build_row(payload, p)
