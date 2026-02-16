@@ -359,3 +359,40 @@ python3 scripts/synthetic_journey_mapper.py --calls-dir data/retell_calls --camp
 ```
 
 For precise payload contracts for n8n and Supabase, use `docs/ontology-synthetic-gate.md`.
+
+## Live Omnichannel Campaign (Apify → Retell → n8n → Twilio → Supabase)
+
+See `docs/Outbound Dialing SOP.md` for the full outbound dialing policy, call/attempt thresholds, and deployment-ready command sequence.
+
+Use these targets for a local deployment dry-run and then live batch calls:
+
+```bash
+make live-build-queue    # writes data/leads/live_leads.csv + live_call_queue.jsonl
+make live-call-batch      # dispatchs live calls respecting daily cap and stop states
+make live-map-journeys    # normalizes call artifacts into live_customer_journeys.jsonl
+make live-export-supabase # writes ont_leads/ont_calls/ont_call_outcomes in Supabase
+```
+
+Minimum required environment (for local run):
+
+- `APIFY_API_TOKEN`
+- `APIFY_ACTOR_ID=compass/crawler-google-places`
+- `RETELL_API_KEY`
+- `B2B_AGENT_ID=agent_5d6f2744acfc79e26ddce13af2`
+- `RETELL_FROM_NUMBER=+14695998571` (inbound/outbound channel number format in E.164)
+- `N8N_LEAD_WEBHOOK_URL` (for lead queue intake)
+- `N8N_OUTCOME_WEBHOOK_URL` (for journey push)
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
+- `SUPABASE_SCHEMA`
+
+Campaign behavior defaults used by the local pipeline:
+
+- States: `Texas,Florida,California`
+- Weekdays: `Mon-Sat`
+- Daily cap: `3` calls
+- Per-lead max attempts: `500` attempts
+- Attempt warning threshold: leads with `attempts > 200` are flagged for review (`attempts_exceeded_200=true`)
+- Graceful escalation: leads with terminal status in `dnc,closed,invalid,contacted,booked` are skipped
+
+Twilio personalization and nurture execution are expected to be done in n8n workflows (email + SMS follow-ups). This repo emits deterministic tool intents (`log_call_outcome`, `set_follow_up_plan`) from `app/tools.py` so downstream workflows can choose actions safely.

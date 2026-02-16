@@ -41,6 +41,13 @@ def _to_ms(value: Any) -> int | None:
     return None
 
 
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
 def _normalize_phone(v: Any) -> str:
     return re.sub(r"\D", "", str(v or ""))
 
@@ -309,6 +316,7 @@ def main() -> int:
         clinic_id = str(metadata.get("clinic_id") or "").strip()
         lead_id = str(metadata.get("lead_id") or "").strip()
 
+        lead = None
         if not lead_id and to_number:
             lead = lead_by_phone.get(_normalize_phone(to_number))
             if lead:
@@ -318,8 +326,24 @@ def main() -> int:
             lead = lead_by_phone.get(f"cid:{clinic_id}")
             if lead:
                 lead_id = str(lead.get("lead_id") or "").strip()
+        if lead is None and lead_id:
+            lead = lead_by_phone.get(lead_id) or lead_by_phone.get(f"cid:{clinic_id}")
 
         campaign_id = str(metadata.get("campaign_id") or args.campaign_id or "").strip()
+        attempt_number = _to_int(metadata.get("attempt_number") or metadata.get("attempt"), 0)
+        attempt_warning_threshold = _to_int(
+            metadata.get("attempt_warning_threshold"),
+            0,
+        )
+        if lead and not attempt_number:
+            attempt_number = _to_int(lead.get("attempts"), 0)
+        if lead and not attempt_warning_threshold:
+            attempt_warning_threshold = _to_int(lead.get("attempt_warning_threshold"), 0)
+        attempts_exceeded_200 = bool(
+            metadata.get("attempts_exceeded_200")
+            or (lead and str(lead.get("attempts_exceeded_200", "")).strip().lower() in {"true", "1", "yes"})
+            or (attempt_warning_threshold and attempt_number > attempt_warning_threshold)
+        )
 
         transcript = _normalize_transcript(call)
         tool_names = _extract_tool_calls(call)
@@ -352,6 +376,9 @@ def main() -> int:
             "conversion_stage": conversion_stage,
             "tool_calls": tool_names,
             "captured_email": captured_email,
+            "attempt_number": attempt_number,
+            "attempt_warning_threshold": attempt_warning_threshold,
+            "attempts_exceeded_200": attempts_exceeded_200,
             "call_status": call_status,
             "sentiment": sentiment,
             "call_duration_ms": int(duration) if isinstance(duration, (int, float)) else None,
